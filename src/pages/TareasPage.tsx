@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getSession } from '../api/endpoints';
 import { httpService } from '../api/httpService';
 import { createCategoria, createTarea, getCategorias, getTareaById, getTareas } from '../api/endpointsDocente-orinetador';
@@ -57,6 +58,7 @@ export default function TareasPage() {
   const userRole = user?.rol;
 
   const Layout = userRole === 'orientador' ? OrientadorLayout : DashboardLayout;
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [tareas, setTareas] = useState<BancoTarea[]>([]);
@@ -279,6 +281,7 @@ export default function TareasPage() {
       console.log('📥 [Tareas] Respuesta crear:', result);
 
       if (result.success) {
+        const createdId = Number((result as any)?.data?.id ?? (result as any)?.id ?? 0);
         await Swal.fire({
           title: 'Tarea creada correctamente',
           icon: 'success',
@@ -288,6 +291,23 @@ export default function TareasPage() {
         setModalCrear(false);
         resetForm();
         loadTareas();
+        // Ofrecer asignar inmediatamente si el usuario es orientador o docente
+        if ((userRole === 'orientador' || userRole === 'docente_aula') && Number.isFinite(createdId) && createdId > 0) {
+          try {
+            const r = await Swal.fire({
+              title: '¿Asignar ahora?',
+              text: 'Para que los acudientes la vean, debes asignarla a curso(s) y período.',
+              icon: 'question',
+              showCancelButton: true,
+              cancelButtonText: 'Luego',
+              confirmButtonText: 'Asignar',
+              confirmButtonColor: '#0f766e'
+            });
+            if (r.isConfirmed) {
+              navigate(`/asignaciones/nueva?bancoTareaId=${createdId}`);
+            }
+          } catch {}
+        }
       } else {
         const status = (result as any)?.status;
         const msg = result.message || 'Error al crear la tarea';
@@ -416,8 +436,8 @@ export default function TareasPage() {
   };
 
   const handleAsignarTarea = (tarea: BancoTarea) => {
-    setTareaSeleccionada(tarea);
-    setModalAsignar(true);
+    // Navegar a la pantalla de creación con la tarea preseleccionada
+    navigate(`/asignaciones/nueva?bancoTareaId=${Number(tarea.id) || 0}`);
   };
 
   const handleVerDetalleTarea = async (tarea: BancoTarea) => {
@@ -710,67 +730,77 @@ export default function TareasPage() {
               {busqueda && <p className="text-sm text-slate-400 mt-1">No se encontraron resultados para "{busqueda}"</p>}
             </div>
           ) : (
-            tareasFiltradas.map((tarea) => (
-              <div key={tarea.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 hover:shadow-md transition-shadow">
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="font-semibold text-slate-800 text-lg">{tarea.titulo}</h3>
-                  <span className="px-2 py-1 bg-teal-100 text-teal-700 rounded text-xs font-semibold">
-                    {tarea.vecesUtilizada || 0} usos
-                  </span>
-                </div>
-                
-                <p className="text-sm text-slate-600 mb-3 line-clamp-2">{tarea.descripcion}</p>
-                
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded font-medium">
-                      {getCategoriaName(tarea.categoriaId)}
+            tareasFiltradas.map((tarea) => {
+              const hasArchivo = Boolean(tarea.archivoUrl || tarea.archivo_url || tarea.archivo);
+              const hasLink = Boolean(tarea.enlace);
+              const hasRecurso = hasArchivo || hasLink;
+              return (
+                <div key={tarea.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 hover:shadow-md transition-all">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="space-y-1">
+                      <h3 className="font-semibold text-slate-900 text-lg leading-snug line-clamp-2">{tarea.titulo}</h3>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded font-medium">
+                          {getCategoriaName(tarea.categoriaId)}
+                        </span>
+                        {tarea.tema && (
+                          <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">
+                            {tarea.tema}
+                          </span>
+                        )}
+                        {hasRecurso && (
+                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded font-medium">
+                            Recurso sugerido
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="px-2 py-1 bg-teal-50 text-teal-700 border border-teal-200 rounded text-xs font-semibold">
+                      {tarea.vecesUtilizada || 0} usos
                     </span>
-                    {tarea.tema && (
-                      <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">
-                        {tarea.tema}
-                      </span>
+                  </div>
+
+                  <p className="text-sm text-slate-700 mb-4 line-clamp-3">{tarea.descripcion}</p>
+
+                  <div className="grid grid-cols-2 gap-2 mb-5 text-xs text-slate-600">
+                    {tarea.gradosObjetivo && tarea.gradosObjetivo.length > 0 ? (
+                      <div className="col-span-2">📚 {getGradosText(tarea.gradosObjetivo)}</div>
+                    ) : (
+                      <div className="col-span-2">📚 Todos los grados</div>
+                    )}
+                    <div>Calificación: <span className="font-medium">{tarea.tipoCalificacion}</span></div>
+                    <div>ID: <span className="font-mono">{tarea.id}</span></div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleVerDetalleTarea(tarea)}
+                      className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
+                      title="Ver detalle"
+                    >
+                      <IconEye size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleAsignarTarea(tarea)}
+                      className="flex-1 px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-sm font-medium"
+                      title="Asignar a cursos"
+                    >
+                      Asignar
+                    </button>
+                    {(userRole === 'orientador' || userRole === 'docente_aula') && (
+                      <>
+                        <button className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors" title="Editar tarea">
+                          <IconEdit size={16} />
+                        </button>
+                        <button className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors" title="Eliminar tarea">
+                          <IconTrash size={16} />
+                        </button>
+                      </>
                     )}
                   </div>
-                  
-                  {tarea.gradosObjetivo && tarea.gradosObjetivo.length > 0 && (
-                    <div className="text-xs text-slate-600">
-                      📚 {getGradosText(tarea.gradosObjetivo)}
-                    </div>
-                  )}
-                  
-                  <div className="text-xs text-slate-500">
-                    Calificación: <span className="font-medium">{tarea.tipoCalificacion}</span>
-                  </div>
                 </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleVerDetalleTarea(tarea)}
-                    className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
-                    title="Ver detalle"
-                  >
-                    <IconEye size={16} />
-                  </button>
-                  <button
-                    onClick={() => handleAsignarTarea(tarea)}
-                    className="flex-1 px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-sm font-medium"
-                  >
-                    Asignar
-                  </button>
-                  {(userRole === 'orientador' || userRole === 'docente_aula') && (
-                    <>
-                      <button className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors">
-                        <IconEdit size={16} />
-                      </button>
-                      <button className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors">
-                        <IconTrash size={16} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 

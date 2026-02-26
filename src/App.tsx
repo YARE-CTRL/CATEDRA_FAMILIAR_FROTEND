@@ -5,6 +5,7 @@ import { getSession } from './api/endpoints'
 
 // Pages - Solo roles web (Admin, Rector, Coordinador, Orientador, Docente)
 import Landing from './pages/Landing'
+import NotFoundPage from './pages/NotFoundPage'
 import LoginPage from './pages/LoginPage'
 import DashboardDocentePage from './pages/DashboardDocentePage'
 import DashboardSupervisorPage from './pages/DashboardSupervisorPage'
@@ -28,6 +29,8 @@ import TareasPage from './pages/TareasPage'
 import EstudiantesDocentePage from './pages/EstudiantesDocentePage'
 import PadresDocentePage from './pages/PadresDocentePage'
 import BancoTareasDocentePage from './pages/BancoTareasDocentePage'
+import EspecialesListPage from './pages/EspecialesListPage'
+import EspecialNuevaPage from './pages/EspecialNuevaPage'
 import EntregasDocentePage from './pages/EntregasDocentePage'
 import EntregasOrientadorPage from './pages/EntregasOrientadorPage'
 import DocenteAsignacionesListPage from './pages/DocenteAsignacionesListPage'
@@ -42,6 +45,7 @@ import AcudienteHijosPage from './pages/AcudienteHijosPage'
 import EstudiantesPage from './pages/EstudiantesPage'
 import OrientadorLayout from './components/orientador-acudiente/OrientadorLayout'
 import AcudienteTareasAutoPage from './pages/AcudienteTareasAutoPage'
+import AcudienteEspecialesPage from './pages/AcudienteEspecialesPage'
 
 // Legacy
 import DashboardPage from './pages/DashboardPage'
@@ -171,6 +175,16 @@ export default function App(){
     <DocenteAsignacionesListPage />
   </ProtectedRoute>
 } />
+<Route path="/docente/especiales" element={
+  <ProtectedRoute allowedRoles={['docente','docente_aula','orientador','coordinador','rector','admin']}>
+    <EspecialesListPage />
+  </ProtectedRoute>
+} />
+<Route path="/docente/especiales/nueva" element={
+  <ProtectedRoute allowedRoles={['docente','docente_aula','orientador','coordinador','rector','admin']}>
+    <EspecialNuevaPage />
+  </ProtectedRoute>
+} />
 <Route path="/docente/asignaciones/:id" element={
   <ProtectedRoute allowedRoles={['docente','docente_aula','orientador','coordinador','rector','admin']}>
     <DocenteAsignacionResumenPage />
@@ -230,6 +244,11 @@ export default function App(){
           <Route path="/acudiente/tareas" element={
             <ProtectedRoute allowedRoles={['acudiente']}>
               <AcudienteTareasAutoPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/acudiente/especiales" element={
+            <ProtectedRoute allowedRoles={['acudiente']}>
+              <AcudienteEspecialesPage />
             </ProtectedRoute>
           } />
           <Route path="/acudiente/estudiantes/:id/tareas" element={
@@ -303,7 +322,7 @@ export default function App(){
           <Route path="/dashboard-old" element={<DashboardPage/>} />
           
           {/* 404 fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
         </SessionTimeoutProvider>
       </BrowserRouter>

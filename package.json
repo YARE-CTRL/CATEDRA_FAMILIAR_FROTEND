@@ -16,8 +16,10 @@
     "test:component": "cypress run --component"
   },
   "dependencies": {
+    "@types/jszip": "^3.4.0",
     "jspdf": "^4.0.0",
     "jspdf-autotable": "^5.0.7",
+    "jszip": "^3.10.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-google-recaptcha": "^3.1.0",

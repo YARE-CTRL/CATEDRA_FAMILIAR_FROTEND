@@ -30,6 +30,7 @@ export default function AcudienteSidebar({ open, onClose }: { open: boolean; onC
     { path: '/dashboard', label: 'Inicio', icon: 'home' },
     { path: '/dashboard/acudiente', label: 'Mi Panel', icon: 'dashboard' },
     { path: '/acudiente/tareas', label: 'Tareas', icon: 'dashboard' },
+    { path: '/acudiente/especiales', label: 'Entregas especiales', icon: 'dashboard' },
     { path: '/acudiente/perfil', label: 'Mi Perfil', icon: 'dashboard' },
   ], [preferredEstudianteId]);
 

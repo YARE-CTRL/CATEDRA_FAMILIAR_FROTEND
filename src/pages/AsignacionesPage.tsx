@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import Button from '../components/ui/Button';
@@ -26,6 +27,8 @@ type AsignacionCreatePayload = {
 };
 
 export default function AsignacionesPage() {
+  const [searchParams] = useSearchParams();
+  const bancoTareaIdParam = useMemo(() => Number(searchParams.get('bancoTareaId') || 0), [searchParams]);
   const session = getSession();
   const user = session?.user;
 
@@ -72,8 +75,7 @@ export default function AsignacionesPage() {
                 const gradosRes = await getGradosPublic();
                 if (gradosRes.success && Array.isArray(gradosRes.data) && gradosRes.data.length) {
                   const flatCursos = gradosRes.data
-                    .flatMap((g: any) => Array.isArray(g?.cursos) ? g.cursos.map((c: any) => ({ ...c, _grado: g })) : [])
-                    .filter((c: any) => !instId || !c.institucionId || c.institucionId === instId);
+                    .flatMap((g: any) => Array.isArray(g?.cursos) ? g.cursos.map((c: any) => ({ ...c, _grado: g })) : []);
                   if (flatCursos.length) {
                     try { console.log('[Cursos][Orientador][/grados] recibidos:', { instId, cantidad: flatCursos.length, muestra: flatCursos.slice(0,3) }); } catch {}
                     return flatCursos;
@@ -120,14 +122,22 @@ export default function AsignacionesPage() {
         const primerPeriodoId = Array.isArray(periodosData) && periodosData.length > 0 ? periodosData[0].id : 0;
         const primerCursoId = Array.isArray(cursosDocenteOrAll) && cursosDocenteOrAll.length > 0 ? cursosDocenteOrAll[0].id : 0;
 
-        setBancoTareaId(prev => prev || primeraTareaId);
+        // Preferir bancoTareaId de la URL si viene
+        setBancoTareaId(prev => prev || (bancoTareaIdParam || primeraTareaId));
         setPeriodoId(prev => prev || primerPeriodoId);
-        setCursoId(prev => prev || primerCursoId);
+        // Comportamiento para orientador: mostrar TODOS los cursos y no preseleccionar uno; activar multi-curso por defecto
+        if (user?.rol === 'orientador') {
+          setEsMultiCurso(true);
+          setCursoId(0);
+          setCursoIds([]);
+        } else {
+          setCursoId(prev => prev || primerCursoId);
+        }
       } finally {
         setLoading(false);
       }
     })();
-  }, [user?.id, user?.institucionId]);
+  }, [user?.id, user?.institucionId, bancoTareaIdParam]);
 
   const toggleCursoId = (id: number) => {
     setCursoIds((prev) => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));

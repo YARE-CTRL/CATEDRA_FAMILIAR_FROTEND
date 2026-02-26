@@ -12,7 +12,7 @@ export default function AcudienteAsignacionDetallePage(){
   const { id } = useParams();
   const asignacionId = Number(id);
   const query = useQuery();
-  const estudianteId = Number(query.get('estudianteId'));
+  const [estudianteIdEff, setEstudianteIdEff] = useState<number>(0);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -27,13 +27,85 @@ export default function AcudienteAsignacionDetallePage(){
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [enviando, setEnviando] = useState(false);
 
+  const parseDate = (s?: string) => {
+    if (!s) return null as Date | null;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const normalizeDeadline = (s?: string) => {
+    const d = parseDate(s);
+    if (!d) return null as Date | null;
+    const isMidnightUTC = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+    if (isMidnightUTC) {
+      const local = new Date(d);
+      local.setHours(23, 59, 59, 999);
+      return local;
+    }
+    return d;
+  };
+
+  const getCursoNombre = (d: any) => {
+    return d?.curso?.nombre || d?.cursoNombre || d?.curso_nombre || d?.curso || '-';
+  };
+
+  const getVence = (d: any) => {
+    const raw = d?.fechaVencimiento || d?.fecha_vencimiento || d?.vence || d?.fechaFin || d?.fecha_fin || d?.deadline || '';
+    return raw && String(raw).trim().length ? String(raw) : 'Sin fecha de vencimiento';
+  };
+
+  // Utilidades de formato y etiqueta de vencimiento
+  function formatISODate(iso?: string | null) {
+    if (!iso) return null as string | null;
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch {
+      return iso as any;
+    }
+  }
+
+  function buildVenceLabelFlat(det: any, urgenciaDias = 3) {
+    const fechaIso = det?.fechaVencimiento as string | undefined;
+    const estado = det?.estado as string | undefined;
+    const diasRestantes = (det as any)?.diasRestantes as number | undefined;
+
+    if (estado === 'vencida') {
+      return { text: 'Vencida', badge: 'error' as const, vence: formatISODate(fechaIso) };
+    }
+
+    const venceFmt = formatISODate(fechaIso);
+    if (!venceFmt) {
+      return { text: 'Sin fecha de vencimiento', badge: null as const, vence: null };
+    }
+
+    if (typeof diasRestantes === 'number' && diasRestantes > 0 && diasRestantes <= urgenciaDias) {
+      return { text: `Vence en ${diasRestantes} día${diasRestantes === 1 ? '' : 's'}`, badge: 'warning' as const, vence: venceFmt };
+    }
+
+    return { text: `Vence: ${venceFmt}`, badge: null as const, vence: venceFmt };
+  }
+
   const load = async () => {
     if (!asignacionId) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await getDetalleAsignacionMovil(asignacionId);
-      setDetalle(data);
+      const raw = await getDetalleAsignacionMovil(asignacionId);
+      const resp = (raw && typeof raw === 'object' && 'data' in (raw as any)) ? (raw as any).data : raw;
+      const tarea = (resp as any)?.tarea || {};
+      const normalized: DetalleAsignacionMovil = {
+        id: (resp as any)?.id ?? asignacionId,
+        titulo: (resp as any)?.titulo ?? tarea.titulo ?? 'Tarea',
+        descripcion: (resp as any)?.descripcion ?? tarea.descripcion ?? '',
+        fechaVencimiento: (resp as any)?.fechaVencimiento ?? (resp as any)?.fecha_vencimiento,
+        curso: (resp as any)?.curso || ((resp as any)?.cursoNombre ? { id: (resp as any)?.cursoId || (resp as any)?.curso_id, nombre: (resp as any)?.cursoNombre } : undefined),
+        entrega: (resp as any)?.entrega ?? null,
+        calificacion: (resp as any)?.calificacion ?? null,
+      } as any;
+      (normalized as any).diasRestantes = (resp as any)?.diasRestantes;
+      (normalized as any).estado = (resp as any)?.estado;
+      (normalized as any).fechaPublicacion = (resp as any)?.fechaPublicacion;
+      setDetalle(normalized);
     } catch (e: any) {
       // Si falla (404), usar fallback desde router state para permitir enviar
       const state = (location as any).state as any;
@@ -55,6 +127,17 @@ export default function AcudienteAsignacionDetallePage(){
 
   useEffect(() => { load(); }, [asignacionId]);
 
+  // Resolver estudianteId desde query o localStorage si falta
+  useEffect(() => {
+    const q = Number(query.get('estudianteId'));
+    if (q && !Number.isNaN(q)) { setEstudianteIdEff(q); return; }
+    try {
+      const v = localStorage.getItem('acudiente_estudiante_id');
+      const nid = v ? Number(v) : 0;
+      if (nid && !Number.isNaN(nid)) setEstudianteIdEff(nid);
+    } catch {}
+  }, [query]);
+
   const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
@@ -62,7 +145,7 @@ export default function AcudienteAsignacionDetallePage(){
   };
 
   const onSubmit = async () => {
-    if (!estudianteId) { alert('Falta estudianteId'); return; }
+    if (!estudianteIdEff) { alert('Falta estudianteId'); return; }
     if (detalle?.entrega) {
       // Ya existe entrega: mostrar aviso y no permitir nuevo envío
       const v = detalle.fechaVencimiento ? new Date(detalle.fechaVencimiento) : null;
@@ -83,7 +166,7 @@ export default function AcudienteAsignacionDetallePage(){
     try {
       const urls = archivosUrl.split('\n').map(s => s.trim()).filter(Boolean);
       const res = await enviarEntregaMovil(asignacionId, {
-        estudianteId,
+        estudianteId: estudianteIdEff,
         descripcion: descripcion || undefined,
         nombreEnvio: nombreEnvio || undefined,
         archivos: archivos.length ? archivos : undefined,
@@ -155,15 +238,29 @@ export default function AcudienteAsignacionDetallePage(){
             <div className="bg-white border rounded-2xl p-4">
               <h1 className="text-xl font-semibold text-slate-800">{detalle.titulo}</h1>
               <p className="mt-1 text-slate-700">{detalle.descripcion}</p>
-              <div className="mt-2 text-sm text-slate-500">Curso: {detalle.curso?.nombre || '-'}</div>
-              <div className="mt-1 text-sm text-slate-500">Vence: {detalle.fechaVencimiento || '-'}</div>
-              {detalle.entrega && (
-                <div className="mt-2">
-                  <span className={`inline-block px-2 py-1 rounded-lg text-xs border ${(()=>{ const v = detalle.fechaVencimiento ? new Date(detalle.fechaVencimiento) : null; const f = detalle.entrega?.fechaEntrega ? new Date(detalle.entrega.fechaEntrega) : null; const tardia = v && f ? (f.getTime() > v.getTime()) : false; return tardia ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'; })()}`}>
-                    {(()=>{ const v = detalle.fechaVencimiento ? new Date(detalle.fechaVencimiento) : null; const f = detalle.entrega?.fechaEntrega ? new Date(detalle.entrega.fechaEntrega) : null; const tardia = v && f ? (f.getTime() > v.getTime()) : false; return tardia ? 'Entregada con retraso' : 'Entregada'; })()}
+              <div className="mt-2 text-sm text-slate-500">Curso: {getCursoNombre(detalle)}</div>
+              <div className="mt-1 text-sm text-slate-700 flex items-center gap-2">
+                {(() => { const info = buildVenceLabelFlat(detalle, 3); return (
+                  <>
+                    <span>{info.text}</span>
+                    {info.badge === 'error' && <span className="inline-flex px-2 py-0.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">Vencida</span>}
+                    {info.badge === 'warning' && <span className="inline-flex px-2 py-0.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">¡Próximo a vencer!</span>}
+                  </>
+                ); })()}
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                {detalle.entrega && (
+                  <span className={`inline-block px-2 py-1 rounded-lg text-xs border ${(()=>{ const v = normalizeDeadline(detalle.fechaVencimiento || undefined); const f = detalle.entrega?.fechaEntrega ? parseDate(detalle.entrega.fechaEntrega) : null; const tardia = v && f ? (f.getTime() > v.getTime()) : false; return tardia ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'; })()}`}>
+                    {(()=>{ const v = normalizeDeadline(detalle.fechaVencimiento || undefined); const f = detalle.entrega?.fechaEntrega ? parseDate(detalle.entrega.fechaEntrega) : null; const tardia = v && f ? (f.getTime() > v.getTime()) : false; return tardia ? 'Entregada con retraso' : 'Entregada'; })()}
                   </span>
-                </div>
-              )}
+                )}
+                {!detalle.entrega && typeof (detalle as any)?.diasRestantes === 'number' && (detalle as any).diasRestantes > 0 && (
+                  <span className="inline-block px-2 py-1 rounded-lg text-xs border bg-amber-50 text-amber-700 border-amber-200">Vence en {(detalle as any).diasRestantes} día{(detalle as any).diasRestantes === 1 ? '' : 's'}</span>
+                )}
+                {!detalle.entrega && ((detalle as any)?.estado === 'vencida') && (
+                  <span className="inline-block px-2 py-1 rounded-lg text-xs border bg-rose-50 text-rose-700 border-rose-200">Vencida</span>
+                )}
+              </div>
             </div>
 
             <div className="bg-white border rounded-2xl p-4">
@@ -232,7 +329,7 @@ export default function AcudienteAsignacionDetallePage(){
                 <textarea className="w-full px-3 py-2 rounded-xl border-2 border-gray-200" rows={3} placeholder="https://..." value={archivosUrl} onChange={(e)=>setArchivosUrl(e.target.value)} />
               </div>
               <div className="pt-2">
-                <Button onClick={onSubmit} disabled={enviando || !estudianteId || !!detalle?.entrega}>{enviando ? 'Enviando...' : 'Enviar'}</Button>
+                <Button onClick={onSubmit} disabled={enviando || !estudianteIdEff || !!detalle?.entrega}>{enviando ? 'Enviando...' : 'Enviar'}</Button>
               </div>
             </div>
 

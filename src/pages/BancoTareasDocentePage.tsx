@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import TeacherLayout from '../components/TeacherLayout';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import FormFieldInput from '../components/ui/FormFieldInput';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/ui/ToastGlobal';
-import { listarBancoTareas, listarCursos, listarPeriodos, crearAsignacion, crearAsignacionOrientador, updateBancoTarea, deleteBancoTarea, type BancoTareaBackend, type CursoBackend, type PeriodoBackend } from '../api/docentes';
-import { getCursosPorInstitucion, getGradosPublic } from '../api/endpointsDocente-orinetador';
+import EmptyState404 from '../components/ui/EmptyState404';
+import { listarBancoTareas, listarCursos, listarPeriodos, crearAsignacion, crearAsignacionOrientador, updateBancoTarea, deleteBancoTarea, crearAsignacionEspecial, crearAsignacionOrientadorEspecial, listarEstudiantesDocente, type BancoTareaBackend, type CursoBackend, type PeriodoBackend } from '../api/docentes';
+import { getCursosPorInstitucion, getGradosPublic, getEstudiantesInstitucionOrientador } from '../api/endpointsDocente-orinetador';
 import { getSession } from '../api/endpoints';
 
 export default function BancoTareasDocentePage(){
@@ -20,6 +21,9 @@ export default function BancoTareasDocentePage(){
   const [categoriaId, setCategoriaId] = useState<number | ''>('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(12);
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [soloConRecurso, setSoloConRecurso] = useState<boolean>(false);
+  const [orden, setOrden] = useState<'recientes' | 'usos' | 'titulo'>('recientes');
 
   const [cursos, setCursos] = useState<CursoBackend[]>([]);
   const [periodos, setPeriodos] = useState<PeriodoBackend[]>([]);
@@ -39,21 +43,78 @@ export default function BancoTareasDocentePage(){
   const [titulo, setTitulo] = useState('');
   const [descripcionExtra, setDescripcionExtra] = useState('');
   const [enlaces, setEnlaces] = useState<string[]>(['']);
+  // Modal especial
+  const [especialOpen, setEspecialOpen] = useState(false);
+  const [especialTarea, setEspecialTarea] = useState<BancoTareaBackend | null>(null);
+  const [especialPeriodoId, setEspecialPeriodoId] = useState<number | ''>('');
+  const [especialFechaInicio, setEspecialFechaInicio] = useState<string>('');
+  const [especialFechaVenc, setEspecialFechaVenc] = useState<string>('');
+  const [especialTitulo, setEspecialTitulo] = useState<string>('');
+  const [especialInBoletin, setEspecialInBoletin] = useState(false);
+  const [especialTema, setEspecialTema] = useState<string>('');
+  const [especialSaving, setEspecialSaving] = useState(false);
+  const [estudiantes, setEstudiantes] = useState<Array<{id:number; nombre:string}>>([]);
+  const [selEstudiantes, setSelEstudiantes] = useState<number[]>([]);
+  const [qEst, setQEst] = useState('');
   // Edición de plantilla
   const [editTitulo, setEditTitulo] = useState('');
   const [editDescripcion, setEditDescripcion] = useState('');
   const [editTema, setEditTema] = useState('');
   const [editFile, setEditFile] = useState<File | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewItem, setPreviewItem] = useState<BancoTareaBackend | null>(null);
+
+  const normalizeHref = (url?: string) => {
+    if (!url) return '#';
+    return url.startsWith('http') ? url : `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+  };
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return items.filter(t => {
+    const base = items.filter(t => {
       const byQ = term ? (`${t.titulo} ${t.descripcion} ${t.tema ?? ''}`).toLowerCase().includes(term) : true;
       const byCat = categoriaId ? t.categoriaId === categoriaId : true;
-      return byQ && byCat;
+      const hasRecurso = Boolean((t as any)?.enlace);
+      const byRec = soloConRecurso ? hasRecurso : true;
+      return byQ && byCat && byRec;
     });
-  }, [items, q, categoriaId]);
+    const arr = [...base];
+    arr.sort((a: any, b: any) => {
+      if (orden === 'titulo') return String(a?.titulo || '').localeCompare(String(b?.titulo || ''));
+      if (orden === 'usos') {
+        const ua = (a?.vecesUtilizada ?? a?.veces_utilizada ?? 0) as number;
+        const ub = (b?.vecesUtilizada ?? b?.veces_utilizada ?? 0) as number;
+        return ub - ua;
+      }
+      const fa = a?.updatedAt ? new Date(a.updatedAt).getTime() : (a?.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const fb = b?.updatedAt ? new Date(b.updatedAt).getTime() : (b?.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return fb - fa;
+    });
+    return arr;
+  }, [items, q, categoriaId, soloConRecurso, orden]);
+
+  const IconEye = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+      <circle cx="12" cy="12" r="3"></circle>
+    </svg>
+  );
+  const IconEdit = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </svg>
+  );
+  const IconTrash = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2" />
+    </svg>
+  );
 
   const paginated = useMemo(() => {
     const start = (page - 1) * limit;
@@ -104,6 +165,79 @@ export default function BancoTareasDocentePage(){
     } finally {
       setLoading(false);
     }
+  };
+
+  const openEspecial = async (t: BancoTareaBackend) => {
+    setEspecialTarea(t);
+    setEspecialTitulo(t.titulo || '');
+    setEspecialTema(t.tema || '');
+    setEspecialPeriodoId('');
+    setEspecialFechaInicio('');
+    setEspecialFechaVenc('');
+    setEspecialInBoletin(false);
+    setSelEstudiantes([]);
+    setQEst('');
+    setEspecialOpen(true);
+    // cargar estudiantes según rol
+    try {
+      const isOrientador = session?.user?.rol === 'orientador';
+      if (isOrientador) {
+        const data: any = await getEstudiantesInstitucionOrientador();
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+        setEstudiantes(list.map((e:any)=>({ id: Number(e.id), nombre: `${e?.nombres || e?.nombre || ''} ${e?.apellidos || ''}`.trim() })));        
+      } else {
+        const list: any = await listarEstudiantesDocente();
+        const arr = Array.isArray(list) ? list : (Array.isArray(list?.data) ? list.data : []);
+        setEstudiantes(arr.map((e:any)=>({ id: Number(e.id), nombre: `${e?.nombres || e?.nombre || ''} ${e?.apellidos || ''}`.trim() })));
+      }
+    } catch (e:any) {
+      showToast(e?.message || 'No se pudieron cargar estudiantes', 'error');
+      setEstudiantes([]);
+    }
+  };
+
+  const toggleEst = (id:number) => {
+    setSelEstudiantes(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+  };
+
+  const onAsignarEspecial = async () => {
+    if (!especialTarea) return;
+    if (!especialPeriodoId || selEstudiantes.length===0) { showToast('Selecciona período y al menos un estudiante', 'error'); return; }
+    setEspecialSaving(true);
+    try {
+      const isOrientador = session?.user?.rol === 'orientador';
+      const today = new Date().toISOString().slice(0,10);
+      const payload: any = {
+        bancoTareaId: Number(especialTarea.id),
+        periodoId: Number(especialPeriodoId),
+        estudianteIds: selEstudiantes,
+        fechaInicio: especialFechaInicio || today,
+        fechaVencimiento: especialFechaVenc || undefined,
+        frecuencia: 'unica',
+        incluirEnBoletin: especialInBoletin,
+        titulo: especialTitulo || especialTarea.titulo,
+        descripcion: especialTarea.descripcion,
+        tema: especialTema || especialTarea.tema,
+      };
+      const res = isOrientador
+        ? await crearAsignacionOrientadorEspecial(payload)
+        : await crearAsignacionEspecial(payload);
+      const ok = (res as any)?.success !== false;
+      if (!ok) { showToast((res as any)?.message || 'No se pudo asignar especial', 'error'); return; }
+      // Incrementar usos localmente
+      setItems(prev => prev.map(it => it.id === (especialTarea as any).id
+        ? ({
+            ...(it as any),
+            vecesUtilizada: ((it as any)?.vecesUtilizada ?? (it as any)?.veces_utilizada ?? 0) + 1,
+            veces_utilizada: ((it as any)?.veces_utilizada ?? (it as any)?.vecesUtilizada ?? 0) + 1
+          }) as any
+        : it
+      ));
+      setEspecialOpen(false);
+      showToast('Asignación especial creada', 'success');
+    } catch (e:any) {
+      showToast(e?.message || 'Error al crear especial', 'error');
+    } finally { setEspecialSaving(false); }
   };
 
   useEffect(() => { load(); }, []);
@@ -165,6 +299,15 @@ export default function BancoTareasDocentePage(){
         showToast((result as any)?.message || 'No se pudo asignar la tarea', 'error');
         return;
       }
+      // Incrementar usos localmente
+      setItems(prev => prev.map(it => it.id === selected.id
+        ? ({
+            ...(it as any),
+            vecesUtilizada: ((it as any)?.vecesUtilizada ?? (it as any)?.veces_utilizada ?? 0) + 1,
+            veces_utilizada: ((it as any)?.veces_utilizada ?? (it as any)?.vecesUtilizada ?? 0) + 1
+          }) as any
+        : it
+      ));
       const createdId = (result as any)?.id || (result as any)?.data?.id;
       setSelected(null);
       showToast('Tarea asignada correctamente', 'success');
@@ -197,7 +340,7 @@ export default function BancoTareasDocentePage(){
 
   return (
     <TeacherLayout>
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-teal-50/40 to-emerald-50/30 rounded-2xl p-6 border border-teal-100/50">
           <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-teal-200/20 to-transparent rounded-full -translate-y-1/2 translate-x-1/2" />
           <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -205,7 +348,7 @@ export default function BancoTareasDocentePage(){
               <h1 className="text-2xl md:text-3xl font-display font-bold text-slate-800">Banco de Tareas</h1>
               <p className="text-slate-600 mt-1 text-sm">Selecciona una tarea y asígnala a tus cursos, agregando recursos de apoyo.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <input
                 value={q}
                 onChange={(e) => { setQ(e.target.value); setPage(1); }}
@@ -217,6 +360,31 @@ export default function BancoTareasDocentePage(){
                 <option value={12}>12</option>
                 <option value={24}>24</option>
               </select>
+              <label className="flex items-center gap-2 text-xs text-slate-700 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                <input type="checkbox" className="h-4 w-4" checked={soloConRecurso} onChange={(e)=> { setSoloConRecurso(e.target.checked); setPage(1); }} />
+                Solo con recurso
+              </label>
+              <select className="px-3 py-2 rounded-xl border-2 border-slate-200 focus:border-teal-500 outline-none text-sm" value={orden} onChange={(e)=> setOrden(e.target.value as any)}>
+                <option value="recientes">Más recientes</option>
+                <option value="usos">Más usadas</option>
+                <option value="titulo">Por título</option>
+              </select>
+              <div className="hidden md:flex items-center rounded-xl border-2 border-slate-200 overflow-hidden">
+                <button
+                  className={`px-3 py-2 text-sm ${viewMode==='grid' ? 'bg-white text-teal-700' : 'bg-slate-100 text-slate-700'} hover:bg-white`}
+                  onClick={()=> setViewMode('grid')}
+                  title="Vista de grilla"
+                >
+                  Grilla
+                </button>
+                <button
+                  className={`px-3 py-2 text-sm ${viewMode==='table' ? 'bg-white text-teal-700' : 'bg-slate-100 text-slate-700'} hover:bg-white border-l-2 border-slate-200`}
+                  onClick={()=> setViewMode('table')}
+                  title="Vista de tabla"
+                >
+                  Tabla
+                </button>
+              </div>
               <Button variant="secondary" onClick={load}>Recargar</Button>
             </div>
           </div>
@@ -225,67 +393,156 @@ export default function BancoTareasDocentePage(){
         {loading ? (
           <div className="flex items-center justify-center h-48"><LoadingSpinner size="lg" text="Cargando..."/></div>
         ) : error ? (
-          <div className="p-4 bg-red-50 text-red-700 rounded-xl">{error}</div>
+          <EmptyState404 title="Error" message={error} action={<Button onClick={load}>Reintentar</Button>} />
         ) : (
           <>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {paginated.map(t => (
-                <div key={t.id} className="bg-white rounded-2xl border border-slate-100 hover:border-teal-200 hover:shadow-md transition-all p-4 flex flex-col gap-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold text-slate-800">{t.titulo}</h3>
+            {viewMode === 'grid' ? (
+              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-8">
+                {paginated.map(t => {
+                  const hasRecurso = Boolean((t as any)?.enlace);
+                  const usos = (t as any)?.vecesUtilizada ?? (t as any)?.veces_utilizada ?? 0;
+                  return (
+                    <div key={t.id} className="relative bg-white rounded-2xl border border-slate-100 hover:border-teal-200 hover:shadow-xl transition-all p-6 flex flex-col gap-4 min-h-[240px]">
+                      {/* Rail utilitario */}
+                      <div className="absolute top-3 right-3 hidden md:flex flex-col gap-2">
+                        <button
+                          className="p-2 rounded-xl border-2 border-gray-200 hover:border-teal-300 text-slate-600"
+                          aria-label="Ver"
+                          title="Vista previa"
+                          onClick={()=> { setPreviewItem(t); setPreviewOpen(true); }}
+                        >
+                          <IconEye />
+                        </button>
+                        <button
+                          className="p-2 rounded-xl border-2 border-gray-200 hover:border-teal-300 text-slate-600"
+                          aria-label="Editar"
+                          title="Editar"
+                          onClick={()=> { setEditing(t); setEditTitulo(t.titulo || ''); setEditDescripcion(t.descripcion || ''); setEditTema(t.tema || ''); setEditFile(null); }}
+                        >
+                          <IconEdit />
+                        </button>
+                        <button
+                          className="p-2 rounded-xl border-2 border-rose-200 hover:border-rose-400 text-rose-600"
+                          aria-label="Eliminar"
+                          title="Eliminar"
+                          onClick={async ()=>{
+                            try {
+                              await deleteBancoTarea(Number(t.id));
+                              showToast('Plantilla eliminada', 'success');
+                              load();
+                            } catch (e: any) {
+                              const status = e?.status || e?.response?.status;
+                              const msg = status === 409 ? 'No se puede eliminar: está referenciada por asignaciones.' : (e?.message || 'Error al eliminar');
+                              showToast(msg, 'error');
+                            }
+                          }}
+                        >
+                          <IconTrash />
+                        </button>
+                      </div>
+
+                      <div className="flex items-start justify-between gap-3 pr-12">
+                        <div className="min-w-0">
+                          <h3 className="text-lg font-semibold text-slate-900 leading-snug line-clamp-2">{t.titulo}</h3>
+                          <div className="mt-1 flex items-center gap-2 text-xs">
+                            {t.tema && (
+                              <span className="px-2 py-1 rounded bg-purple-100 text-purple-700 font-medium">{t.tema}</span>
+                            )}
+                            {hasRecurso && (
+                              <span className="px-2 py-1 rounded bg-emerald-100 text-emerald-700 font-medium">Recurso sugerido</span>
+                            )}
+                          </div>
+                        </div>
+                        <span className="shrink-0 px-2 py-1 rounded border border-teal-200 bg-teal-50 text-teal-700 text-xs font-semibold">{usos} usos</span>
+                      </div>
+
+                      <p className="text-sm text-slate-700 line-clamp-3">{t.descripcion}</p>
+
+                      {hasRecurso && (
+                        <button className="text-teal-600 text-sm underline" onClick={() => { setPreviewItem(t); setPreviewOpen(true); }}>Ver recurso</button>
+                      )}
+
+                      <div className="mt-auto -mx-6 px-6 pt-4 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <Button onClick={()=> { openAsignar(t); }}>Asignar a curso</Button>
+                        <Button variant="secondary" onClick={()=> openEspecial(t)}>Asignar especial</Button>
+                      </div>
                     </div>
-                    {t.tema && <span className="px-2 py-1 text-xs rounded-lg bg-teal-50 text-teal-700 border border-teal-100">{t.tema}</span>}
-                  </div>
-                  <p className="text-sm text-slate-600 line-clamp-3">{t.descripcion}</p>
-                  {t.enlace && <a className="text-teal-600 text-sm underline" href={t.enlace} target="_blank">Recurso sugerido</a>}
-                  <div className="mt-auto flex items-center justify-end gap-2">
-                    <button
-                      className="p-2 rounded-xl border-2 border-gray-200 hover:border-teal-300 text-slate-600"
-                      aria-label="Ver"
-                      title="Ver"
-                      onClick={()=> { console.log('[Banco][Ver] plantilla', t.id, t.titulo); showToast(`Vista previa: ${t.titulo}`, 'info'); }}
-                    >
-                      <span role="img" aria-hidden>👁️</span>
-                    </button>
-
-                    <Button size="sm" onClick={()=> { console.log('[Banco][Asignar] plantilla', t.id); openAsignar(t); }}>Asignar</Button>
-
-                    <button
-                      className="p-2 rounded-xl border-2 border-gray-200 hover:border-teal-300 text-slate-600"
-                      aria-label="Editar"
-                      title="Editar"
-                      onClick={()=> { console.log('[Banco][Editar][open] plantilla', t.id); setEditing(t); setEditTitulo(t.titulo || ''); setEditDescripcion(t.descripcion || ''); setEditTema(t.tema || ''); setEditFile(null); }}
-                    >
-                      <span role="img" aria-hidden>✏️</span>
-                    </button>
-
-                    <button
-                      className="p-2 rounded-xl border-2 border-rose-200 hover:border-rose-400 text-rose-600"
-                      aria-label="Eliminar"
-                      title="Eliminar"
-                      onClick={async ()=>{
-                        console.log('[Banco][Eliminar][click] plantilla', t.id);
-                        try {
-                          console.log('[Banco][Eliminar][start] plantilla', t.id);
-                          await deleteBancoTarea(Number(t.id));
-                          console.log('[Banco][Eliminar][ok] plantilla', t.id);
-                          showToast('Plantilla eliminada', 'success');
-                          load();
-                        } catch (e: any) {
-                          console.error('[Banco][Eliminar][error] plantilla', t.id, e);
-                          const status = e?.status || e?.response?.status;
-                          const msg = status === 409 ? 'No se puede eliminar: está referenciada por asignaciones.' : (e?.message || 'Error al eliminar');
-                          showToast(msg, 'error');
-                        }
-                      }}
-                    >
-                      <span role="img" aria-hidden>🗑️</span>
-                    </button>
-                  </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Título</th>
+                        <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Tema</th>
+                        <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Descripción</th>
+                        <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Recurso</th>
+                        <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Usos</th>
+                        <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginated.map(t => {
+                        const hasRecurso = Boolean((t as any)?.enlace);
+                        const usos = (t as any)?.vecesUtilizada ?? (t as any)?.veces_utilizada ?? 0;
+                        return (
+                          <tr key={t.id} className="border-t border-slate-100">
+                            <td className="px-4 py-3 font-medium text-slate-800">{t.titulo}</td>
+                            <td className="px-4 py-3 text-slate-700">{t.tema ? <span className="px-2 py-0.5 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 text-xs">{t.tema}</span> : '-'}</td>
+                            <td className="px-4 py-3 text-slate-600"><div className="line-clamp-2 max-w-[380px]">{t.descripcion}</div></td>
+                            <td className="px-4 py-3 text-slate-700">{hasRecurso ? <button className="text-teal-600 underline" onClick={()=> { setPreviewItem(t); setPreviewOpen(true); }}>Ver recurso</button> : '-'}</td>
+                            <td className="px-4 py-3 text-slate-700">{usos}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  className="p-2 rounded-xl border-2 border-gray-200 hover:border-teal-300 text-slate-600"
+                                  aria-label="Ver"
+                                  title="Vista previa"
+                                  onClick={()=> { setPreviewItem(t); setPreviewOpen(true); }}
+                                >
+                                  <IconEye />
+                                </button>
+                                <Button size="sm" onClick={()=> { openAsignar(t); }}>Asignar</Button>
+                                <Button size="sm" variant="secondary" onClick={()=> openEspecial(t)}>Asignar especial</Button>
+                                <button
+                                  className="p-2 rounded-xl border-2 border-gray-200 hover:border-teal-300 text-slate-600"
+                                  aria-label="Editar"
+                                  title="Editar"
+                                  onClick={()=> { setEditing(t); setEditTitulo(t.titulo || ''); setEditDescripcion(t.descripcion || ''); setEditTema(t.tema || ''); setEditFile(null); }}
+                                >
+                                  <IconEdit />
+                                </button>
+                                <button
+                                  className="p-2 rounded-xl border-2 border-rose-200 hover:border-rose-400 text-rose-600"
+                                  aria-label="Eliminar"
+                                  title="Eliminar"
+                                  onClick={async ()=>{
+                                    try {
+                                      await deleteBancoTarea(Number(t.id));
+                                      showToast('Plantilla eliminada', 'success');
+                                      load();
+                                    } catch (e: any) {
+                                      const status = e?.status || e?.response?.status;
+                                      const msg = status === 409 ? 'No se puede eliminar: está referenciada por asignaciones.' : (e?.message || 'Error al eliminar');
+                                      showToast(msg, 'error');
+                                    }
+                                  }}
+                                >
+                                  <IconTrash />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between px-1 py-3">
               <div className="text-sm text-slate-600">Página {page} de {totalPages}</div>
@@ -296,6 +553,9 @@ export default function BancoTareasDocentePage(){
                 <Button size="sm" variant="ghost" onClick={()=> setPage(totalPages)} disabled={page===totalPages}>»</Button>
               </div>
             </div>
+            {filtered.length === 0 && (
+              <EmptyState404 title="Sin resultados" message="No encontramos tareas con tus filtros. Ajusta la búsqueda o quita ‘Solo con recurso’." />
+            )}
           </>
         )}
 
@@ -376,6 +636,100 @@ export default function BancoTareasDocentePage(){
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={()=> setSelected(null)}>Cancelar</Button>
                 <Button onClick={onAsignar} disabled={saving || !periodoId || cursoIds.length===0}>{saving ? 'Asignando...' : 'Asignar'}</Button>
+              </div>
+            </div>
+          )}
+        </Modal>
+
+        {/* Modal Vista previa */}
+        <Modal isOpen={previewOpen} onClose={()=> { setPreviewOpen(false); setPreviewItem(null); }} title={previewItem?.titulo || 'Vista previa'} size="xl">
+          {!!previewItem && (
+            <div className="space-y-4">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                <div className="text-sm text-slate-600">
+                  {previewItem.tema && (
+                    <div className="mb-2 inline-block px-2 py-0.5 rounded-lg border bg-purple-50 text-purple-700 border-purple-200 text-xs">{previewItem.tema}</div>
+                  )}
+                  <div className="whitespace-pre-wrap text-slate-800">{previewItem.descripcion}</div>
+                </div>
+                <div className="shrink-0 flex gap-2">
+                  <Button size="sm" onClick={()=> { setPreviewOpen(false); openAsignar(previewItem); }}>Asignar</Button>
+                  <Button size="sm" variant="secondary" onClick={()=> { setPreviewOpen(false); openEspecial(previewItem); }}>Especial</Button>
+                </div>
+              </div>
+
+              {(previewItem as any)?.enlace ? (
+                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="px-3 py-2 text-xs text-slate-600 bg-slate-50 border-b border-slate-200">Recurso</div>
+                  <div className="aspect-video bg-slate-50">
+                    <iframe src={normalizeHref((previewItem as any).enlace)} title="Recurso" className="w-full h-96" />
+                  </div>
+                  <div className="px-3 py-2 bg-slate-50 border-t border-slate-200 text-right">
+                    <a className="text-teal-700 underline text-sm" href={normalizeHref((previewItem as any).enlace)} target="_blank" rel="noreferrer">Abrir en nueva pestaña</a>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-2">
+                  <EmptyState404 title="Recurso no disponible" message="Esta plantilla no tiene recurso adjunto o no es accesible actualmente." />
+                </div>
+              )}
+            </div>
+          )}
+        </Modal>
+
+        {/* Modal Asignación Especial */}
+        <Modal isOpen={especialOpen} onClose={()=> setEspecialOpen(false)} title="Asignar especial" size="lg">
+          {!!especialTarea && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormFieldInput label="Título" name="espTitulo" value={especialTitulo} onChange={(e)=> setEspecialTitulo(e.target.value)} />
+                <FormFieldInput label="Tema" name="espTema" value={especialTema} onChange={(e)=> setEspecialTema(e.target.value)} />
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Periodo</label>
+                  <select className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-teal-500" value={especialPeriodoId} onChange={(e)=> setEspecialPeriodoId(e.target.value ? Number(e.target.value) : '')}>
+                    <option value="">Selecciona periodo</option>
+                    {periodos.map(p => (<option key={p.id} value={p.id}>{p.nombre}</option>))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2 pt-7">
+                  <input id="espBoletin" type="checkbox" className="w-4 h-4" checked={especialInBoletin} onChange={(e)=> setEspecialInBoletin(e.target.checked)} />
+                  <label htmlFor="espBoletin" className="text-sm text-slate-700">Incluir en boletín</label>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Fecha inicio</label>
+                  <input type="date" className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-teal-500" value={especialFechaInicio} onChange={(e)=> setEspecialFechaInicio(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Fecha vencimiento</label>
+                  <input type="date" className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-teal-500" value={especialFechaVenc} onChange={(e)=> setEspecialFechaVenc(e.target.value)} />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-semibold text-gray-700">Selecciona estudiantes</div>
+                  <input className="px-3 py-2 rounded-xl border-2 border-gray-200" placeholder="Buscar..." value={qEst} onChange={(e)=> setQEst(e.target.value)} />
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2 max-h-64 overflow-auto pr-1">
+                  {estudiantes
+                    .filter(e => !qEst || e.nombre.toLowerCase().includes(qEst.toLowerCase()))
+                    .map(e => (
+                      <label key={e.id} className={`px-3 py-2 rounded-xl border-2 text-sm cursor-pointer ${selEstudiantes.includes(e.id) ? 'border-teal-500 bg-teal-50' : 'border-gray-200 hover:border-teal-300'}`}>
+                        <input type="checkbox" className="mr-2" checked={selEstudiantes.includes(e.id)} onChange={()=> toggleEst(e.id)} />
+                        {e.nombre}
+                      </label>
+                    ))}
+                  {estudiantes.length === 0 && (
+                    <div className="col-span-2 text-sm text-slate-500">No hay estudiantes visibles.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={()=> setEspecialOpen(false)}>Cancelar</Button>
+                <Button onClick={onAsignarEspecial} loading={especialSaving} disabled={especialSaving || !especialPeriodoId || selEstudiantes.length===0}>
+                  {especialSaving ? 'Asignando...' : 'Asignar especial'}
+                </Button>
               </div>
             </div>
           )}

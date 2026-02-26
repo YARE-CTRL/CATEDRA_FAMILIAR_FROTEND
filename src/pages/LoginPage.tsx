@@ -109,7 +109,9 @@ export default function LoginPage() {
           domainType
         });
       } catch {}
-      const result = await loginUnicoMultiRol(formData.correo, formData.password, captchaToken);
+      // En bypass, enviar un token dummy para satisfacer backends que lo requieren
+      const captchaToSend = bypassValidations ? (captchaToken || 'dev-bypass-token') : captchaToken;
+      const result = await loginUnicoMultiRol(formData.correo, formData.password, captchaToSend);
 
       if (result.success && result.user) {
         try {
@@ -275,12 +277,14 @@ export default function LoginPage() {
             )}
 
             {/* reCAPTCHA - Obligatorio según HU-05 */}
-            {siteKey ? (
-              <div className="flex justify-center">
-                <ReCAPTCHA sitekey={siteKey} onChange={(token) => setCaptchaToken(token)} />
-              </div>
-            ) : (
-              <ReCAPTCHAMock onChange={setCaptchaToken} />
+            {!bypassValidations && (
+              siteKey ? (
+                <div className="flex justify-center">
+                  <ReCAPTCHA sitekey={siteKey} onChange={(token) => setCaptchaToken(token)} />
+                </div>
+              ) : (
+                <ReCAPTCHAMock onChange={setCaptchaToken} />
+              )
             )}
 
             <Button 

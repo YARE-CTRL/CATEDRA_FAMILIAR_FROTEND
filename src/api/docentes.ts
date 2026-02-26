@@ -19,6 +19,16 @@ export interface EstudianteBackend {
   cursoId?: number;
 }
 
+function getSessionUser() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('session') : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed?.user || null;
+  } catch {
+    return null;
+  }
+}
+
 // Bandeja de entregas para Orientador
 export async function listarEntregasOrientador(params?: { cursoId?: number; asignacionId?: number; soloPendientes?: boolean }) {
   const parse = (body: any): { data: EntregaBackend[]; meta?: any } => {
@@ -36,9 +46,53 @@ export async function listarEntregasOrientador(params?: { cursoId?: number; asig
   };
 
   try {
-    const response = await httpService.get<any>('/orientador/entregas', params);
+    // Evitar enviar flags no soportados como soloPendientes
+    const qp: any = { ...params };
+    if ('soloPendientes' in qp) delete qp.soloPendientes;
+    const response = await httpService.get<any>('/orientador/entregas', qp);
     const parsed = parse(response.data);
-    return { data: parsed.data, meta: parsed.meta };
+    const normalized = Array.isArray(parsed.data)
+      ? (parsed.data as any[]).map((e: any) => {
+          let archivos: any[] = [];
+          if (typeof e.archivosUrl === 'string') {
+            try {
+              const arr = JSON.parse(e.archivosUrl);
+              if (Array.isArray(arr)) {
+                archivos = arr.map((it: any) => ({
+                  url: it.url || it.path || '',
+                  originalName: it.fileName || it.originalName || it.nombre || undefined,
+                  fileName: it.fileName,
+                }));
+              }
+            } catch {}
+          } else if (Array.isArray(e.archivos)) {
+            archivos = e.archivos.map((it: any) =>
+              typeof it === 'string'
+                ? { url: it, originalName: it, fileName: it }
+                : it
+            );
+          }
+
+          const estudianteNombre = e.estudiante?.nombres && e.estudiante?.apellidos
+            ? `${e.estudiante.nombres} ${e.estudiante.apellidos}`
+            : (e.estudiante?.nombre || e.estudianteNombre);
+
+          // Derivar campos de calificación
+          const notaRaw = e.nota ?? e.valor ?? e.puntuacion ?? e.puntaje ?? e.score ?? e.notaNumerica;
+          const escala = e.escala ?? e.rango ?? (typeof notaRaw === 'number' && notaRaw <= 5 ? '1-5' : undefined);
+          const notaCualitativa = e.notaCualitativa ?? e.concepto ?? e.cualitativa ?? undefined;
+          const baseCalif = e.calificacion && typeof e.calificacion === 'object' ? e.calificacion : {};
+          const calificacion =
+            e.calificacion != null
+              ? { ...baseCalif }
+              : (e.estado === 'calificada' || notaRaw != null || notaCualitativa != null)
+                ? { ...(e.detalleCalificacion || {}), nota: notaRaw, escala, notaCualitativa }
+                : null;
+
+          return { ...e, archivos, estudianteNombre, calificacion } as EntregaBackend;
+        }) as any as EntregaBackend[]
+      : parsed.data;
+    return { data: normalized, meta: parsed.meta };
   } catch (err: any) {
     throw err;
   }
@@ -65,8 +119,39 @@ export async function listarAsignacionesOrientador(params?: {
   if (qp.cursoId && !qp.curso) qp.curso = qp.cursoId;
   const response = await httpService.get<any>('/orientador/asignaciones', qp);
   const body = response.data || {};
-  const data = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
-  const meta = body?.meta;
+  // Aceptar múltiples formas: {asignaciones: [...]}, {data:[...]}, array directo, o {data:{data:[...]}}
+  let data: any[] = [];
+  let meta: any = body?.meta;
+  if (Array.isArray(body?.asignaciones)) {
+    data = body.asignaciones;
+    meta = body?.meta ?? meta;
+  } else if (Array.isArray(body?.data)) {
+    data = body.data;
+  } else if (body && typeof body === 'object' && body.data && Array.isArray(body.data?.data)) {
+    data = body.data.data;
+    meta = body.data?.meta ?? meta;
+  } else if (Array.isArray(body)) {
+    data = body;
+  }
+  // Fallback: si no hay datos, intentar con /docente/asignaciones (backend permite orientador)
+  if (!Array.isArray(data) || data.length === 0) {
+    try {
+      const resp2 = await httpService.get<any>('/docente/asignaciones', qp);
+      const b2 = resp2.data || {};
+      if (Array.isArray(b2?.asignaciones)) {
+        data = b2.asignaciones;
+        meta = b2?.meta ?? meta;
+      } else if (Array.isArray(b2?.data)) {
+        data = b2.data;
+        meta = b2?.meta ?? meta;
+      } else if (b2 && typeof b2 === 'object' && b2.data && Array.isArray(b2.data?.data)) {
+        data = b2.data.data;
+        meta = b2.data?.meta ?? meta;
+      } else if (Array.isArray(b2)) {
+        data = b2;
+      }
+    } catch {}
+  }
   // Normalizar a una forma similar a AsignacionBackend cuando sea posible
   const mapped = (data as any[]).map((a: any) => ({
     id: a.id,
@@ -81,6 +166,7 @@ export async function listarAsignacionesOrientador(params?: {
     docenteId: a.docente?.id,
     entregas: { realizadas: 0, total: 0 },
     estado: a.estado,
+    esIndividual: a.esIndividual ?? a.es_individual ?? false,
   }));
   return { data: mapped, raw: data, meta } as { data: AsignacionBackend[]; raw: any[]; meta?: any };
 }
@@ -136,8 +222,13 @@ export async function crearAsignacionOrientador(payload: {
   titulo?: string;
   descripcion?: string;
   tema?: string;
+  docenteId?: number;
 }) {
-  const response = await httpService.post('/asignaciones/orientador', payload);
+  const user = getSessionUser();
+  const body = (!('docenteId' in payload) || payload.docenteId == null) && user?.rol === 'orientador'
+    ? { ...payload, docenteId: Number(user.id) }
+    : payload;
+  const response = await httpService.post('/asignaciones/orientador', body);
   return response.data;
 }
 
@@ -149,8 +240,39 @@ export async function crearCalificacion(payload: {
   notaCualitativa?: string | null;
   retroalimentacion?: string | null;
 }) {
-  const res = await httpService.post('/calificaciones', payload);
-  return res.data;
+  // No enviar docenteId; solo los campos requeridos por el backend
+  const primaryBody: any = {
+    entregaId: payload.entregaId,
+    ...(payload.nota != null ? { nota: payload.nota } : {}),
+    ...(payload.retroalimentacion != null ? { retroalimentacion: payload.retroalimentacion } : {}),
+    ...(payload.notaCualitativa != null ? { notaCualitativa: payload.notaCualitativa } : {}),
+    ...(payload.escala ? { escala: payload.escala } : {}),
+  };
+  try {
+    const res = await httpService.post('/calificaciones', primaryBody);
+    return res.data;
+  } catch (e: any) {
+    const retryable = [400, 403, 404, 405];
+    if (!retryable.includes(e?.status)) throw e;
+    // Reintento con snake_case básico (sin docenteId)
+    const altSnake: any = {
+      entrega_id: payload.entregaId,
+      nota: payload.nota,
+      retroalimentacion: payload.retroalimentacion,
+      nota_cualitativa: payload.notaCualitativa,
+      ...(payload.escala ? { escala: payload.escala } : {}),
+    };
+    try {
+      const r2 = await httpService.post('/calificaciones', altSnake);
+      return r2.data;
+    } catch (e2: any) {
+      if (!retryable.includes(e2?.status)) throw e2;
+    }
+    // Último intento: forma mínima solo con entregaId
+    const minimal = { entregaId: payload.entregaId } as any;
+    const r3 = await httpService.post('/calificaciones', minimal);
+    return r3.data;
+  }
 }
 
 export interface AcudienteBackend {
@@ -217,6 +339,7 @@ export interface AsignacionBackend {
   fechaVencimiento?: string;
   estado?: 'pendiente' | 'entregada' | 'calificada' | 'vencida';
   entregas?: { realizadas: number; total: number };
+  esIndividual?: boolean;
 }
 
 export interface ResumenAsignacionBackend {
@@ -382,6 +505,7 @@ export async function listarAsignaciones(params?: {
         realizadas: a.entregas ?? a.entregasRealizadas ?? 0,
         total: a.totalEstudiantes ?? a.total_estudiantes ?? 0,
       },
+      esIndividual: a.esIndividual ?? a.es_individual ?? false,
     }));
     return { data: mapped, meta: body.meta };
   }
@@ -498,9 +622,14 @@ export async function crearAsignacion(payload: {
   descripcion?: string;
   tema?: string;
   institucionId?: number;
+  docenteId?: number;
 }) {
   // El backend acepta snake_case o camelCase, mantenemos camelCase
-  const response = await httpService.post('/asignaciones', payload);
+  const user = getSessionUser();
+  const body = (!('docenteId' in payload) || payload.docenteId == null) && user?.rol === 'orientador'
+    ? { ...payload, docenteId: Number(user.id) }
+    : payload;
+  const response = await httpService.post('/asignaciones', body);
   return response.data;
 }
 
@@ -529,6 +658,41 @@ export async function updateAsignacion(
 // Eliminar asignación
 export async function deleteAsignacion(id: number) {
   const res = await httpService.delete(`/asignaciones/${id}`);
+  return res.data;
+}
+
+// Crear asignación especial (dirigida a estudiantes específicos)
+export async function crearAsignacionEspecial(payload: {
+  bancoTareaId: number;
+  periodoId: number;
+  estudianteIds: number[];
+  fechaInicio?: string;
+  fechaVencimiento?: string;
+  frecuencia?: string;
+  incluirEnBoletin?: boolean;
+  titulo?: string;
+  descripcion?: string;
+  tema?: string;
+}) {
+  const body = { ...payload } as any;
+  const res = await httpService.post('/asignaciones/especial', body);
+  return res.data;
+}
+
+export async function crearAsignacionOrientadorEspecial(payload: {
+  bancoTareaId: number;
+  periodoId: number;
+  estudianteIds: number[];
+  fechaInicio?: string;
+  fechaVencimiento?: string;
+  frecuencia?: string;
+  incluirEnBoletin?: boolean;
+  titulo?: string;
+  descripcion?: string;
+  tema?: string;
+}) {
+  const body = { ...payload } as any;
+  const res = await httpService.post('/asignaciones/orientador/especial', body);
   return res.data;
 }
 

@@ -35,6 +35,8 @@ export default function TeacherSidebar({ open, onClose }: { open: boolean; onClo
     { path: '/dashboard/docente', label: 'Mi Panel', icon: 'dashboard' },
     { path: '/docente/banco-tareas', label: 'Banco de Tareas', icon: 'tasks' },
     { path: '/docente/asignaciones', label: 'Asignaciones', icon: 'tasks' },
+    { path: '/docente/especiales', label: 'Asignaciones especiales', icon: 'tasks' },
+    { path: '/docente/especiales/nueva', label: 'Nueva especial', icon: 'plus' },
     { path: '/entregas', label: 'Entregas', icon: 'inbox' },
     { path: '/docente/estudiantes', label: 'Estudiantes (mis cursos)', icon: 'users' },
     { path: '/docente/acudientes', label: 'Acudientes (mis estudiantes)', icon: 'users' },

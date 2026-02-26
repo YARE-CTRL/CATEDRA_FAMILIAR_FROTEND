@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import TeacherLayout from '../components/TeacherLayout';
 import Button from '../components/ui/Button';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
-import { listarAsignaciones, listarCursos, listarPeriodos, listarAsignacionesOrientador, updateAsignacion, deleteAsignacion, type AsignacionBackend, type CursoBackend, type PeriodoBackend } from '../api/docentes';
+import { listarAsignaciones, listarCursos, listarPeriodos, listarAsignacionesOrientador, listarEntregasDocente, listarEntregasOrientador, updateAsignacion, deleteAsignacion, type AsignacionBackend, type CursoBackend, type PeriodoBackend } from '../api/docentes';
 import { getSession, getCursos } from '../api/endpoints';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import Swal from 'sweetalert2';
@@ -151,7 +151,81 @@ const onDelete = async (a: AsignacionBackend) => {
         }
       }
       const metaOut = resAny?.data?.meta || resAny?.meta || null;
-      setItems(sorted as any);
+
+      const parseDate = (s?: string) => {
+        if (!s) return null as Date | null;
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : d;
+      };
+      const normalizeDeadline = (s?: string) => {
+        const d = parseDate(s);
+        if (!d) return null as Date | null;
+        const isMidnightUTC = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+        if (isMidnightUTC) {
+          const local = new Date(d);
+          local.setHours(23, 59, 59, 999);
+          return local;
+        }
+        return d;
+      };
+
+      // Enriquecer con conteos reales de entregas según rol
+      if (user?.rol === 'orientador' && Array.isArray(sorted) && sorted.length > 0) {
+        try {
+          const enriched = await Promise.all(sorted.map(async (a: any) => {
+            try {
+              const ent = await listarEntregasOrientador({ asignacionId: Number(a.id), soloPendientes: false });
+              const entAny: any = ent as any;
+              const list = Array.isArray(entAny?.data) ? entAny.data : [];
+              const meta = entAny?.meta || {};
+              const total = (typeof meta?.total === 'number' && meta.total > 0) ? meta.total : list.length;
+              const realizadas = list.filter((e: any) => !!e.calificacion || e.estado === 'calificada').length;
+              // Derivar estado
+              const now = new Date();
+              const end = a.fechaVencimiento ? normalizeDeadline(a.fechaVencimiento) : null;
+              const isPast = end ? end.getTime() < now.getTime() : false;
+              let estado = a.estado || '';
+              if (total > 0 && realizadas >= total) estado = 'calificada';
+              else if (total > 0) estado = 'entregada';
+              else estado = end ? (isPast ? 'vencida' : 'pendiente') : 'pendiente';
+              return { ...a, entregas: { realizadas, total }, estado };
+            } catch {
+              return a;
+            }
+          }));
+          setItems(enriched as any);
+        } catch {
+          setItems(sorted as any);
+        }
+      } else if (user?.rol !== 'orientador' && Array.isArray(sorted) && sorted.length > 0) {
+        try {
+          const enriched = await Promise.all(sorted.map(async (a: any) => {
+            try {
+              const ent = await listarEntregasDocente({ asignacionId: Number(a.id), soloPendientes: false });
+              const entAny: any = ent as any;
+              const list = Array.isArray(entAny?.data) ? entAny.data : (Array.isArray(entAny) ? entAny : []);
+              const meta = entAny?.meta || {};
+              const total = (typeof meta?.total === 'number' && meta.total > 0) ? meta.total : list.length;
+              const realizadas = list.filter((e: any) => !!e.calificacion || e.estado === 'calificada').length;
+              const now = new Date();
+              const end = a.fechaVencimiento ? normalizeDeadline(a.fechaVencimiento) : null;
+              const isPast = end ? end.getTime() < now.getTime() : false;
+              let estado = a.estado || '';
+              if (total > 0 && realizadas >= total) estado = 'calificada';
+              else if (total > 0) estado = 'entregada';
+              else estado = end ? (isPast ? 'vencida' : 'pendiente') : 'pendiente';
+              return { ...a, entregas: { realizadas, total }, estado };
+            } catch {
+              return a;
+            }
+          }));
+          setItems(enriched as any);
+        } catch {
+          setItems(sorted as any);
+        }
+      } else {
+        setItems(sorted as any);
+      }
       setMeta(metaOut);
       setPeriodos(per);
       setCursos(cur);
@@ -307,8 +381,7 @@ const onDelete = async (a: AsignacionBackend) => {
                     const isPast = end ? end.getTime() < now.getTime() : false;
                     const completada = realizadas >= total && total > 0;
                     let estadoVis: string = a.estado || '';
-                    if (a.estado === 'calificada') estadoVis = 'calificada';
-                    else if (completada) estadoVis = 'entregada';
+                    if (a.estado === 'calificada' || completada) estadoVis = 'calificada';
                     else if (end) estadoVis = isPast ? 'vencida' : 'pendiente';
                     else estadoVis = 'pendiente';
 

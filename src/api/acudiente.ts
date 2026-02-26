@@ -9,14 +9,24 @@ export interface TareaAsignadaMovil {
   estado: 'pendiente' | 'entregada' | 'calificada' | 'vencida' | 'entregada_tardia';
   cursoId?: number;
   cursoNombre?: string;
+  esIndividual?: boolean;
 }
 
 // Obtiene estudiantes vinculados al acudiente autenticado (y opcionalmente asignaciones)
 export async function getMisEstudiantesAcudiente(): Promise<Array<{ id: number; nombres?: string; apellidos?: string; cursoId?: number }>> {
-  const res = await httpService.get('/acudientes/mis-estudiantes');
-  const body: any = res.data;
-  const data = (body && typeof body === 'object' && 'data' in body) ? (body as any).data : body;
-  return Array.isArray(data?.estudiantes) ? data.estudiantes : (Array.isArray(data) ? data : []);
+  // Ruta principal móvil
+  try {
+    const res = await httpService.get('/api/movil/acudientes/mis-estudiantes');
+    const body: any = res.data;
+    const data = (body && typeof body === 'object' && 'data' in body) ? (body as any).data : body;
+    return Array.isArray(data?.estudiantes) ? data.estudiantes : (Array.isArray(data) ? data : []);
+  } catch (e: any) {
+    // Alias de compatibilidad
+    const res2 = await httpService.get('/api/acudientes/mis-estudiantes');
+    const body2: any = res2.data;
+    const data2 = (body2 && typeof body2 === 'object' && 'data' in body2) ? (body2 as any).data : body2;
+    return Array.isArray(data2?.estudiantes) ? data2.estudiantes : (Array.isArray(data2) ? data2 : []);
+  }
 }
 
 // Opcional: helper para páginas que quieran usar el paquete combinado
@@ -112,17 +122,42 @@ export async function listarTareasEstudiante(estudianteId: number, opts: { perio
   }
 }
 
-export async function getDetalleAsignacionMovil(asignacionId: number): Promise<DetalleAsignacionMovil> {
+export async function getDetalleAsignacionMovil(asignacionId: number, opts?: { estudianteId?: number }): Promise<DetalleAsignacionMovil> {
   try {
-    const res = await httpService.get(`/asignaciones/${asignacionId}/detalle`);
+    const res = await httpService.get(`/api/movil/asignaciones/${asignacionId}/detalle`, opts?.estudianteId ? { estudianteId: opts.estudianteId } : undefined);
     const body: any = res.data;
     const data = (body && typeof body === 'object' && 'data' in body) ? (body as any).data : body;
     return data as DetalleAsignacionMovil;
   } catch (err: any) {
-    const res = await httpService.get(`/movil/asignaciones/${asignacionId}/detalle`);
-    const body: any = res.data;
-    const data = (body && typeof body === 'object' && 'data' in body) ? (body as any).data : body;
-    return data as DetalleAsignacionMovil;
+    // Fallback a ruta de compatibilidad si la móvil no existe
+    if (err && (err.status === 404 || err.status === 405)) {
+      try {
+        const res = await httpService.get(`/api/asignaciones/${asignacionId}/detalle`, opts?.estudianteId ? { estudianteId: opts.estudianteId } : undefined);
+        const body: any = res.data;
+        const data = (body && typeof body === 'object' && 'data' in body) ? (body as any).data : body;
+        return data as DetalleAsignacionMovil;
+      } catch (err2: any) {
+        if (err2 && (err2.status === 404 || err2.status === 405)) {
+          // Intentar sin sufijo '/detalle'
+          try {
+            const res3 = await httpService.get(`/api/movil/asignaciones/${asignacionId}`, opts?.estudianteId ? { estudianteId: opts.estudianteId } : undefined);
+            const body3: any = res3.data;
+            const data3 = (body3 && typeof body3 === 'object' && 'data' in body3) ? (body3 as any).data : body3;
+            return data3 as DetalleAsignacionMovil;
+          } catch (err3: any) {
+            if (err3 && (err3.status === 404 || err3.status === 405)) {
+              const res4 = await httpService.get(`/api/asignaciones/${asignacionId}`, opts?.estudianteId ? { estudianteId: opts.estudianteId } : undefined);
+              const body4: any = res4.data;
+              const data4 = (body4 && typeof body4 === 'object' && 'data' in body4) ? (body4 as any).data : body4;
+              return data4 as DetalleAsignacionMovil;
+            }
+            throw err3;
+          }
+        }
+        throw err2;
+      }
+    }
+    throw err;
   }
 }
 
@@ -133,9 +168,6 @@ export async function enviarEntregaMovil(asignacionId: number, payload: {
   archivosUrl?: string[];
   nombreEnvio?: string;
 }): Promise<any> {
-  const base = '/api';
-  const token = (() => { try { const s = localStorage.getItem('session'); return s ? JSON.parse(s).token : null; } catch { return null; } })();
-  const urlPrimary = `${base}/asignaciones/${asignacionId}/entregas`;
   const hasFiles = (payload.archivos && payload.archivos.length > 0);
   if (hasFiles) {
     const form = new FormData();
@@ -145,18 +177,37 @@ export async function enviarEntregaMovil(asignacionId: number, payload: {
     (payload.archivos || []).forEach((f) => form.append('archivos', f));
     (payload.archivosUrl || []).forEach((u) => form.append('archivosUrl', u));
 
-    const response = await httpService.post(`/asignaciones/${asignacionId}/entregas`, form);
-    if (response.status !== 200 && response.status !== 201) throw new Error(response.data);
-    return response.data;
+    try {
+      const response = await httpService.post(`/api/movil/asignaciones/${asignacionId}/entregas`, form);
+      if (response.status !== 200 && response.status !== 201) throw new Error(response.data);
+      return response.data;
+    } catch (e: any) {
+      if (e && (e.status === 404 || e.status === 405)) {
+        const response = await httpService.post(`/api/asignaciones/${asignacionId}/entregas`, form);
+        if (response.status !== 200 && response.status !== 201) throw new Error(response.data);
+        return response.data;
+      }
+      throw e;
+    }
   } else {
-    const response = await httpService.post(`/asignaciones/${asignacionId}/entregas`, {
+    const body = {
       estudianteId: payload.estudianteId,
       descripcion: payload.descripcion,
       archivosUrl: payload.archivosUrl,
       nombreEnvio: payload.nombreEnvio,
-    });
-    if (response.status !== 200 && response.status !== 201) throw new Error(response.data);
-    return response.data;
+    } as const;
+    try {
+      const response = await httpService.post(`/api/movil/asignaciones/${asignacionId}/entregas`, body);
+      if (response.status !== 200 && response.status !== 201) throw new Error(response.data);
+      return response.data;
+    } catch (e: any) {
+      if (e && (e.status === 404 || e.status === 405)) {
+        const response = await httpService.post(`/api/asignaciones/${asignacionId}/entregas`, body);
+        if (response.status !== 200 && response.status !== 201) throw new Error(response.data);
+        return response.data;
+      }
+      throw e;
+    }
   }
 }
 
@@ -165,7 +216,7 @@ export async function editarEntregaMovil(entregaId: number, payload: {
   archivosNuevos?: Array<{ url: string; nombre?: string }>;
   archivosEliminar?: number[];
 }) {
-  const res = await httpService.put(`/entregas/${entregaId}`, payload);
+  const res = await httpService.put(`/api/entregas/${entregaId}`, payload);
   return res.data;
 }
 
@@ -177,4 +228,65 @@ export async function listarHistorialEstudiante(estudianteId: number, opts: { pe
   const body: any = res.data;
   const data = (body && typeof body === 'object' && 'data' in body) ? (body as any).data : body;
   return Array.isArray(data) ? data : [];
+}
+
+// Lista solo tareas especiales (esIndividual=true) para un estudiante (o 'me')
+export async function listarTareasEspeciales(estudianteId: number | 'me', opts: { periodo?: number | string } = {}): Promise<TareaAsignadaMovil[]> {
+  const params: any = {};
+  if (opts.periodo) params.periodo = opts.periodo;
+  // Preferir ruta no-móvil cuando el id es numérico, según solicitud del frontend web
+  const primaryPath = typeof estudianteId === 'number'
+    ? `/api/estudiantes/${estudianteId}/tareas-especiales`
+    : `/api/movil/estudiantes/${estudianteId}/tareas-especiales`;
+  const fallbackPath = typeof estudianteId === 'number'
+    ? `/api/movil/estudiantes/${estudianteId}/tareas-especiales`
+    : `/api/estudiantes/${estudianteId}/tareas-especiales`;
+  try {
+    const res = await httpService.get(primaryPath, params);
+    const body: any = res.data;
+    const data = (body && typeof body === 'object' && 'data' in body) ? (body as any).data : body;
+    if (!Array.isArray(data)) return [];
+    return data.map((a: any) => {
+      const estadoRaw = a.estado || a.status || 'pendiente';
+      const estadoNorm: TareaAsignadaMovil['estado'] = (
+        ['pendiente','entregada','calificada','vencida','entregada_tardia'] as const
+      ).includes(estadoRaw) ? estadoRaw : 'pendiente';
+      return {
+        id: Number(a.asignacionId || a.id),
+        titulo: a.titulo || 'Tarea especial',
+        descripcion: a.descripcionCorta || a.descripcion || '',
+        fechaInicio: a.fechaPublicacion || a.fecha_publicacion,
+        fechaVencimiento: a.fechaVencimiento || a.fecha_vencimiento,
+        estado: estadoNorm,
+        cursoId: undefined,
+        cursoNombre: undefined,
+        esIndividual: a.esIndividual === true || a.es_individual === true,
+      } as TareaAsignadaMovil;
+    });
+  } catch (e: any) {
+    if (e && (e.status === 404 || e.status === 405)) {
+      const res2 = await httpService.get(fallbackPath, params);
+      const body2: any = res2.data;
+      const data2 = (body2 && typeof body2 === 'object' && 'data' in body2) ? (body2 as any).data : body2;
+      if (!Array.isArray(data2)) return [];
+      return data2.map((a: any) => {
+        const estadoRaw = a.estado || a.status || 'pendiente';
+        const estadoNorm: TareaAsignadaMovil['estado'] = (
+          ['pendiente','entregada','calificada','vencida','entregada_tardia'] as const
+        ).includes(estadoRaw) ? estadoRaw : 'pendiente';
+        return {
+          id: Number(a.asignacionId || a.id),
+          titulo: a.titulo || 'Tarea especial',
+          descripcion: a.descripcionCorta || a.descripcion || '',
+          fechaInicio: a.fechaPublicacion || a.fecha_publicacion,
+          fechaVencimiento: a.fechaVencimiento || a.fecha_vencimiento,
+          estado: estadoNorm,
+          cursoId: undefined,
+          cursoNombre: undefined,
+          esIndividual: a.esIndividual === true || a.es_individual === true,
+        } as TareaAsignadaMovil;
+      });
+    }
+    throw e;
+  }
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getSession, logout } from '../api/endpoints';
 import TeacherSidebar from './TeacherSidebar';
+import HelpAssistant from '../components/ui/HelpAssistant';
 import { IconMenu, IconLogout } from './ui/Icons';
 import { useNavigate } from 'react-router-dom';
 
@@ -73,6 +74,9 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
       <div className="px-4 py-6 lg:pl-72">
         <main className="min-h-[60vh] max-w-7xl mx-auto">{children}</main>
       </div>
+
+      {/* Ayuda flotante para docentes */}
+      <HelpAssistant />
     </div>
   );
 }

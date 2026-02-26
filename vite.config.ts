@@ -7,10 +7,14 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://escuelaparapadres-backend-1.onrender.com', // URL del backend en Render
+        target: 'http://127.0.0.1:3333', // URL del backend
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      '/uploads': {
+        target: 'http://localhost:3333',
+        changeOrigin: true,
       },
     },
   },

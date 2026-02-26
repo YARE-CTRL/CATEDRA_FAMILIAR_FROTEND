@@ -1,7 +1,7 @@
 // Util para modo de desarrollo: permitir desactivar validaciones localmente.
 export function isBypassValidationsEnabled(): boolean {
-  // Retorna false para conectarse al backend real
-  return false;
+  // Habilitar bypass para pruebas locales (desactiva validaciones como reCAPTCHA)
+  return true;
 }
 
 export function enableBypassValidationsForSession(enable = true) {

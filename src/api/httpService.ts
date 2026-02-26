@@ -26,9 +26,9 @@ class HttpService {
 
   constructor(config: Partial<ApiConfig> = {}) {
     this.config = {
-      // Usar '/api' como baseURL por defecto para aprovechar el proxy de Vite
-      baseURL: config.baseURL || '/api',
-      timeout: config.timeout || 15000,
+      // Usar backend local directo por defecto para evitar 404 del dev server
+      baseURL: config.baseURL || 'http://localhost:3333',
+      timeout: config.timeout || 30000,
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
