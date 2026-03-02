@@ -7,6 +7,7 @@ import {
   eliminarDocente,
   getCursosCRUD
 } from '../api/endpoints';
+import httpService from '../api/httpService';
 import DashboardLayout from '../components/DashboardLayout';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import Modal from '../components/ui/Modal';
@@ -92,22 +93,71 @@ export default function DocentesPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [docentesData, cursosData] = await Promise.all([
-        getDocentesCRUD(),
-        getCursosCRUD()
-      ]);
-      const filtrados = user?.institucionId
-        ? docentesData.filter((d: any) => Number(d?.institucionId) === Number(user?.institucionId))
+      console.log('[DEBUG][DocentesPage] Usuario:', {
+        rol: user?.rol,
+        id: user?.id,
+        institucionId: user?.institucionId,
+        sessionInstitucionId: (session as any)?.context?.institucionId
+      });
+
+      // Para orientadores, usar endpoint específico
+      let docentesData;
+      if (user?.rol === 'orientador') {
+        try {
+          const response = await httpService.get('/orientadores/docentes');
+          const result = response.data;
+          docentesData = result?.data || result?.docentes || result || [];
+          
+          console.log('[DEBUG][DocentesPage] Usando endpoint /orientadores/docentes:', {
+            status: response.status,
+            cantidad: docentesData?.length || 0,
+            datos: docentesData?.slice(0, 3),
+            estructura: Object.keys(result || {})
+          });
+        } catch (error) {
+          console.log('[DEBUG][DocentesPage] Error con /orientadores/docentes, usando fallback:', error);
+          // Fallback al endpoint general
+          docentesData = await getDocentesCRUD();
+        }
+      } else {
+        docentesData = await getDocentesCRUD();
+      }
+
+      console.log('[DEBUG][DocentesPage] Docentes recibidos:', {
+        cantidad: docentesData?.length || 0,
+        datos: docentesData?.slice(0, 3),
+        tipo: typeof docentesData
+      });
+
+      // Filtrar docentes por institución del usuario
+      const userInstitucionId = user?.institucionId || (session as any)?.context?.institucionId;
+      const filtrados = userInstitucionId
+        ? docentesData.filter((d: any) => {
+            const docenteInstitucionId = d?.institucionId || d?.institucion_id || d?.institucion?.id;
+            const pasa = Number(docenteInstitucionId) === Number(userInstitucionId);
+            
+            console.log('[DEBUG][DocentesPage] Filtrando docente:', {
+              id: d.id,
+              nombre: d.nombre,
+              apellido: d.apellido,
+              docenteInstitucionId,
+              userInstitucionId,
+              pasa
+            });
+            
+            return pasa;
+          })
         : docentesData;
-      try {
-        console.log('[DocentesPage][loadData] totales:', {
-          recibidos: Array.isArray(docentesData) ? docentesData.length : 'no-array',
-          institucionId: user?.institucionId,
-          filtrados: Array.isArray(filtrados) ? filtrados.length : 'no-array'
-        });
-      } catch {}
+
+      console.log('[DEBUG][DocentesPage] Resultados:', {
+        recibidos: Array.isArray(docentesData) ? docentesData.length : 'no-array',
+        institucionId: userInstitucionId,
+        filtrados: Array.isArray(filtrados) ? filtrados.length : 'no-array',
+        muestra: filtrados?.slice(0, 3)
+      });
+
       setDocentes(filtrados);
-      setCursos(cursosData);
+      setCursos(await getCursosCRUD());
     } catch (error) {
       console.error('Error cargando datos:', error);
       showToast('error', 'Error al cargar los datos');
@@ -294,9 +344,9 @@ export default function DocentesPage() {
   // Filtrar docentes
   const docentesFiltrados = docentes.filter(d => {
     const matchBusqueda = 
-      d.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-      d.apellido.toLowerCase().includes(busqueda.toLowerCase()) ||
-      d.correo.toLowerCase().includes(busqueda.toLowerCase());
+      (d.nombre?.toLowerCase().includes(busqueda.toLowerCase()) || '') ||
+      (d.apellido?.toLowerCase().includes(busqueda.toLowerCase()) || '') ||
+      (d.correo?.toLowerCase().includes(busqueda.toLowerCase()) || '');
     
     const matchActivo = 
       filtroActivo === 'todos' ||
@@ -421,7 +471,7 @@ export default function DocentesPage() {
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
                             <span className="text-primary-700 font-semibold">
-                              {docente.nombre[0]}{docente.apellido[0]}
+                              {(docente.nombre || '?')[0]}{(docente.apellido || '?')[0]}
                             </span>
                           </div>
                           <div>

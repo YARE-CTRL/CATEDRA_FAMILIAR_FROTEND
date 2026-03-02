@@ -542,7 +542,15 @@ export default function TareasPage() {
   const fetchFileBlobUrl = async (url: string): Promise<string | null> => {
     setLoadingFile(true);
     try {
-      const response = await httpService.get(url, { responseType: 'blob' });
+      // Si es un path de uploads, usar el proxy /uploads
+      // Si no, usar la URL tal cual (para URLs externas)
+      let fetchUrl = url;
+      if (isBackendStoredUploadPath(url)) {
+        // Para uploads, usar el proxy /uploads que apunta al backend
+        fetchUrl = url.startsWith('/') ? url : `/${url}`;
+      }
+      
+      const response = await httpService.get(fetchUrl, { responseType: 'blob' });
       if (response.status === 401) {
         await Swal.fire({
           title: 'Sesión expirada',
@@ -585,14 +593,30 @@ export default function TareasPage() {
   };
 
   const handleViewInternalFileByTareaId = async (tareaId: number) => {
-    const url = `/api/tareas/${tareaId}/archivo`;
+    if (!tareaDetalle?.enlace) return;
+    
+    let url = tareaDetalle.enlace;
+    
+    // Si es un path de uploads, asegurarse de que comience con /
+    if (isBackendStoredUploadPath(url)) {
+      url = url.startsWith('/') ? url : `/${url}`;
+    }
+    
     const blobUrl = await fetchFileBlobUrl(url);
     if (!blobUrl) return;
     window.open(blobUrl, '_blank', 'noreferrer');
   };
 
   const handleDownloadInternalFileByTareaId = async (tareaId: number, fileNameHint?: string) => {
-    const url = `/api/tareas/${tareaId}/archivo`;
+    if (!tareaDetalle?.enlace) return;
+    
+    let url = tareaDetalle.enlace;
+    
+    // Si es un path de uploads, asegurarse de que comience con /
+    if (isBackendStoredUploadPath(url)) {
+      url = url.startsWith('/') ? url : `/${url}`;
+    }
+    
     const blobUrl = await fetchFileBlobUrl(url);
     if (!blobUrl) return;
 

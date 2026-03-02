@@ -278,7 +278,7 @@ export default function App(){
           <Route path="/entregas" element={<ProtectedRoute allowedRoles={['docente','docente_aula']}><EntregasDocentePage /></ProtectedRoute>} />
           <Route path="/docente/entregas" element={<ProtectedRoute allowedRoles={['docente','docente_aula']}><EntregasDocentePage /></ProtectedRoute>} />
           {/* Orientador - Entregas */}
-          <Route path="/orientador/entregas" element={<ProtectedRoute allowedRoles={['orientador']}><EntregasOrientadorPage /></ProtectedRoute>} />
+          <Route path="/" element={<ProtectedRoute allowedRoles={['orientador']}><EntregasOrientadorPage /></ProtectedRoute>} />
 <Route path="/estudiantes" element={
   <ProtectedRoute allowedRoles={['orientador']}>
     <OrientadorLayout>

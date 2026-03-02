@@ -460,12 +460,74 @@ export async function listarCursos() {
     return Array.isArray(body) ? (body as CursoBackend[]) : [];
   };
 
-  // Usar únicamente /cursos para evitar colisiones con rutas dinámicas del backend
   try {
-    const res = await httpService.get<any>('/cursos');
+    // Obtener información del usuario para logging
+    const session = localStorage.getItem('session');
+    let userInfo = null;
+    if (session) {
+      try {
+        userInfo = JSON.parse(session);
+        console.log('[DEBUG][listarCursos] Usuario:', {
+          rol: userInfo?.user?.rol,
+          id: userInfo?.user?.id,
+          institucionId: userInfo?.user?.institucionId
+        });
+      } catch (e) {
+        console.warn('[DEBUG][listarCursos] Error parseando sesión:', e);
+      }
+    }
+
+    // Intentar primero obtener cursos del docente logueado
+    console.log('[DEBUG][listarCursos] Intentando /docentes/mis-cursos');
+    const res = await httpService.get<any>('/docentes/mis-cursos');
+    console.log('[DEBUG][listarCursos] Respuesta /docentes/mis-cursos:', res.data);
     const list = parseCursos(res.data);
+    console.log('[DEBUG][listarCursos] Cursos del docente parseados:', { cantidad: list.length, muestra: list.slice(0, 3) });
+    
+    // Si no hay cursos del docente, intentar cursos de la institución
+    if (list.length === 0) {
+      console.log('[DEBUG][listarCursos] Sin cursos del docente, intentando por institución');
+      try {
+        if (session) {
+          const parsed = JSON.parse(session);
+          const institucionId = parsed?.user?.institucionId;
+          console.log('[DEBUG][listarCursos] Institución ID:', institucionId);
+          if (institucionId) {
+            const resInst = await httpService.get<any>(`/cursos/institucion/${institucionId}`);
+            console.log('[DEBUG][listarCursos] Respuesta /cursos/institucion:', resInst.data);
+            const listInst = parseCursos(resInst.data);
+            console.log('[DEBUG][listarCursos] Cursos por institución parseados:', { cantidad: listInst.length, muestra: listInst.slice(0, 3) });
+            return listInst;
+          }
+        }
+      } catch (error) {
+        console.warn('[DEBUG][listarCursos] No se pudieron obtener cursos por institución:', error);
+      }
+    }
+    
     return list;
-  } catch {
+  } catch (error) {
+    console.warn('[DEBUG][listarCursos] Error obteniendo cursos del docente, intentando fallback:', error);
+    
+    // Fallback: intentar cursos de la institución
+    try {
+      const session = localStorage.getItem('session');
+      if (session) {
+        const parsed = JSON.parse(session);
+        const institucionId = parsed?.user?.institucionId;
+        console.log('[DEBUG][listarCursos] Fallback - Institución ID:', institucionId);
+        if (institucionId) {
+          const resInst = await httpService.get<any>(`/cursos/institucion/${institucionId}`);
+          console.log('[DEBUG][listarCursos] Fallback - Respuesta /cursos/institucion:', resInst.data);
+          const listInst = parseCursos(resInst.data);
+          console.log('[DEBUG][listarCursos] Fallback - Cursos parseados:', { cantidad: listInst.length, muestra: listInst.slice(0, 3) });
+          return listInst;
+        }
+      }
+    } catch (fallbackError) {
+      console.warn('[DEBUG][listarCursos] Fallback también falló:', fallbackError);
+    }
+    
     return [];
   }
 }

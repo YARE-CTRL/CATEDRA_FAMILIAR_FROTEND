@@ -26,8 +26,8 @@ class HttpService {
 
   constructor(config: Partial<ApiConfig> = {}) {
     this.config = {
-      // Usar backend local directo por defecto para evitar 404 del dev server
-      baseURL: config.baseURL || 'http://localhost:3333',
+      // Usar proxy de Vite en desarrollo para evitar problemas CORS
+      baseURL: config.baseURL || (import.meta.env.DEV ? '/api' : 'http://localhost:3333'),
       timeout: config.timeout || 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -64,14 +64,18 @@ class HttpService {
     return headers;
   }
 
-  private async handleResponse<T>(response: Response): Promise<HttpResponse<T>> {
-    const contentType = response.headers.get('content-type');
+  private async handleResponse<T>(response: Response, responseType?: 'blob'): Promise<HttpResponse<T>> {
     let data: T;
 
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
+    if (responseType === 'blob') {
+      data = await response.blob() as T;
     } else {
-      data = await response.text() as unknown as T;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        data = await response.text() as unknown as T;
+      }
     }
 
     if (!response.ok) {
@@ -80,8 +84,8 @@ class HttpService {
         status: response.status
       };
 
-      // Si hay data con mensaje de error del servidor
-      if (typeof data === 'object' && data !== null && 'message' in data) {
+      // Si hay data con mensaje de error del servidor y no es blob
+      if (responseType !== 'blob' && typeof data === 'object' && data !== null && 'message' in data) {
         error.message = (data as any).message;
       }
 
@@ -96,16 +100,27 @@ class HttpService {
     };
   }
 
-  async get<T = any>(endpoint: string, params?: Record<string, any>): Promise<HttpResponse<T>> {
+  async get<T = any>(endpoint: string, params?: Record<string, any> & { responseType?: 'blob' }): Promise<HttpResponse<T>> {
+    // Detectar si es un endpoint de uploads para usar el proxy correcto
+    const isUploadsEndpoint = endpoint.startsWith('/uploads/') || endpoint.startsWith('uploads/');
+    
     // Construir URL correctamente
-const base = this.config.baseURL.endsWith('/') ? this.config.baseURL.slice(0, -1) : this.config.baseURL;
-const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
-const url = new URL(`${base}${path}`, origin);
+    let base: string;
+    if (isUploadsEndpoint) {
+      // Para uploads, usar el proxy /uploads directamente
+      base = import.meta.env.DEV ? '' : this.config.baseURL;
+    } else {
+      // Para otros endpoints, usar el base URL configurado
+      base = this.config.baseURL.endsWith('/') ? this.config.baseURL.slice(0, -1) : this.config.baseURL;
+    }
+    
+    const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const url = new URL(`${base}${path}`, origin);
  
 if (params) {
   Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) {
+    if (key !== 'responseType' && value !== undefined && value !== null) {
       url.searchParams.append(key, String(value));
     }
   });
@@ -116,13 +131,20 @@ if (params) {
 
     try {
       console.log(`[DEBUG][API] GET:`, url.toString());
+      const headers = this.getHeaders();
+      
+      // Si se solicita blob, cambiar el header Accept
+      if (params?.responseType === 'blob') {
+        headers['Accept'] = 'application/octet-stream, image/*, application/pdf, */*';
+      }
+      
       const response = await fetch(url, {
         method: 'GET',
-        headers: this.getHeaders(),
+        headers,
         signal: controller.signal
       });
       console.log(`[DEBUG][API] GET Response:`, response.status, response.statusText);
-      return await this.handleResponse<T>(response);
+      return await this.handleResponse<T>(response, params?.responseType);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error(`Request timeout after ${this.config.timeout}ms`);
@@ -204,7 +226,7 @@ if (params) {
     let lastUnauthorizedTime = 0;
     
     const originalHandleResponse = this.handleResponse.bind(this);
-    this.handleResponse = async function<T>(this: HttpService, response: Response): Promise<HttpResponse<T>> {
+    this.handleResponse = async function<T>(this: HttpService, response: Response, responseType?: 'blob'): Promise<HttpResponse<T>> {
       // Solo ejecutar logout en 401 si NO es un endpoint de login
       const isLoginEndpoint = response.url.includes('/login');
       
@@ -235,7 +257,7 @@ if (params) {
         consecutiveUnauthorized = 0;
       }
       
-      return originalHandleResponse(response);
+      return originalHandleResponse(response, responseType);
     };
   }
 }

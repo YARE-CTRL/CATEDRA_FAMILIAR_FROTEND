@@ -141,7 +141,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           { type: 'link', path: '/tareas', label: 'Tareas', icon: 'tasks' },
           { type: 'link', path: '/docente/asignaciones', label: 'Asignaciones', icon: 'tasks' },
           { type: 'link', path: '/asignaciones/nueva', label: 'Asignar tarea', icon: 'tasks' },
-          { type: 'link', path: '/orientador/entregas', label: 'Entregas', icon: 'inbox' },
+   /*        { type: 'link', path: '/orientador/entregas', label: 'Entregas', icon: 'inbox' }, */
           { type: 'link', path: '/padres-familia', label: 'Padres de Familia', icon: 'family' },
           {
             type: 'group',

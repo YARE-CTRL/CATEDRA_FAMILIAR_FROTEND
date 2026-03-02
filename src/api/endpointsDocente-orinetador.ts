@@ -375,7 +375,27 @@ export async function getEstudiantesInstitucionOrientador(): Promise<any[]> {
     }
 
     const data = raw?.data ?? raw?.estudiantes ?? [];
-    if (Array.isArray(data) && data.length > 0) return data;
+    if (Array.isArray(data) && data.length > 0) {
+      // Normalizar ID desde múltiples posibles campos y asegurar unicidad
+      const normalized = data
+        .map((e: any) => {
+          const idRaw =
+            e?.id ??
+            e?.estudianteId ??
+            e?.estudiante_id ??
+            e?.idEstudiante ??
+            e?.id_estudiante ??
+            e?.usuarioId ??
+            e?.userId ??
+            e?.estudiante?.id ??
+            0;
+          const idNum = Number(idRaw) || 0;
+          return idNum > 0 ? { ...e, id: idNum } : e;
+        })
+        .filter((e: any) => Number.isFinite(Number(e?.id)) && Number(e.id) > 0)
+        .filter((e: any, idx: number, arr: any[]) => arr.findIndex(x => Number(x.id) === Number(e.id)) === idx);
+      return normalized;
+    }
 
     // Fallback: si no hay estudiantes por el endpoint de orientador,
     // intentar obtener el listado general de estudiantes.
@@ -383,7 +403,25 @@ export async function getEstudiantesInstitucionOrientador(): Promise<any[]> {
       const resp2 = await httpService.get<any>('/estudiantes');
       const raw2 = resp2.data as any;
       const data2 = raw2?.data ?? raw2?.estudiantes ?? [];
-      return Array.isArray(data2) ? data2 : [];
+      if (!Array.isArray(data2)) return [];
+      const normalized2 = data2
+        .map((e: any) => {
+          const idRaw =
+            e?.id ??
+            e?.estudianteId ??
+            e?.estudiante_id ??
+            e?.idEstudiante ??
+            e?.id_estudiante ??
+            e?.usuarioId ??
+            e?.userId ??
+            e?.estudiante?.id ??
+            0;
+          const idNum = Number(idRaw) || 0;
+          return idNum > 0 ? { ...e, id: idNum } : e;
+        })
+        .filter((e: any) => Number.isFinite(Number(e?.id)) && Number(e.id) > 0)
+        .filter((e: any, idx: number, arr: any[]) => arr.findIndex(x => Number(x.id) === Number(e.id)) === idx);
+      return normalized2;
     } catch {
       return [];
     }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import TeacherLayout from '../components/TeacherLayout';
+import OrientadorLayout from '../components/orientador-acudiente/OrientadorLayout';
 import Button from '../components/ui/Button';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { listarAsignaciones, listarCursos, listarPeriodos, listarAsignacionesOrientador, listarEntregasDocente, listarEntregasOrientador, updateAsignacion, deleteAsignacion, type AsignacionBackend, type CursoBackend, type PeriodoBackend } from '../api/docentes';
@@ -11,6 +12,8 @@ import Modal from '../components/ui/Modal';
 export default function DocenteAsignacionesListPage(){
   const session = getSession();
   const user = session?.user;
+  const isOrientador = user?.rol === 'orientador';
+  const Layout: React.ComponentType<any> = isOrientador ? OrientadorLayout : TeacherLayout;
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation() as any;
   const [loading, setLoading] = useState(true);
@@ -256,7 +259,7 @@ const onDelete = async (a: AsignacionBackend) => {
   ], []);
 
   return (
-    <TeacherLayout>
+    <Layout>
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-teal-50/40 to-emerald-50/30 rounded-2xl p-6 border border-teal-100/50">
           <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-teal-200/20 to-transparent rounded-full -translate-y-1/2 translate-x-1/2" />
@@ -480,6 +483,6 @@ const onDelete = async (a: AsignacionBackend) => {
           </div>
         )}
       </Modal>
-    </TeacherLayout>
+    </Layout>
   );
 }

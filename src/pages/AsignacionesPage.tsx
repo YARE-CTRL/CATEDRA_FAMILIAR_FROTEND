@@ -65,54 +65,101 @@ export default function AsignacionesPage() {
       try {
         const docenteId = user?.id || 0;
         const instId = (user as any)?.institucionId ?? (session as any)?.context?.institucionId ?? 0;
+        
+        // Logging para depuración
+        console.log('[DEBUG][Asignaciones] Usuario:', {
+          rol: user?.rol,
+          id: user?.id,
+          institucionId: user?.institucionId,
+          sessionInstitucionId: (session as any)?.context?.institucionId,
+          instIdFinal: instId
+        });
 
         const [tareas, cursosDocenteOrAll, periodosData] = await Promise.all([
           listarBancoTareas(),
           (async () => {
             if (user?.rol === 'orientador') {
-              // 1) Preferir /grados (público) y aplanar sus cursos
+              // Orientador: obtener cursos de su institución
               try {
-                const gradosRes = await getGradosPublic();
-                if (gradosRes.success && Array.isArray(gradosRes.data) && gradosRes.data.length) {
-                  const flatCursos = gradosRes.data
-                    .flatMap((g: any) => Array.isArray(g?.cursos) ? g.cursos.map((c: any) => ({ ...c, _grado: g })) : []);
-                  if (flatCursos.length) {
-                    try { console.log('[Cursos][Orientador][/grados] recibidos:', { instId, cantidad: flatCursos.length, muestra: flatCursos.slice(0,3) }); } catch {}
-                    return flatCursos;
+                console.log('[DEBUG][Orientador] Obteniendo cursos para institución:', instId);
+                const res = await getCursosPorInstitucion(Number(instId || 0));
+                let lista = Array.isArray(res?.data) ? res.data : [];
+                console.log('[DEBUG][Orientador] Cursos por institución:', { cantidad: lista.length, datos: res });
+                
+                // Si no hay cursos por institución, intentar grados públicos
+                if (!Array.isArray(lista) || lista.length === 0) {
+                  console.log('[DEBUG][Orientador] Sin cursos por institución, intentando grados públicos');
+                  try {
+                    const gradosRes = await getGradosPublic();
+                    if (gradosRes.success && Array.isArray(gradosRes.data) && gradosRes.data.length) {
+                      const flatCursos = gradosRes.data
+                        .flatMap((g: any) => Array.isArray(g?.cursos) ? g.cursos.map((c: any) => ({ ...c, _grado: g })) : []);
+                      if (flatCursos.length) {
+                        lista = flatCursos;
+                        console.log('[DEBUG][Orientador] Cursos desde grados públicos:', { cantidad: flatCursos.length });
+                      }
+                    }
+                  } catch (error) {
+                    console.error('[DEBUG][Orientador] Error obteniendo grados públicos:', error);
                   }
                 }
-              } catch {}
-
-              // 2) Fallback: /cursos/institucion/:institucionId (público)
-              const res = await getCursosPorInstitucion(Number(instId || 0));
-              let lista = Array.isArray(res?.data) ? res.data : [];
-
-              // 3) Fallback final: /cursos (todos) opcionalmente filtrado por institución
-              if (!Array.isArray(lista) || lista.length === 0) {
-                try {
-                  const all = await getCursos(Number(instId || undefined));
-                  lista = Array.isArray(all) ? all : [];
-                } catch {}
+                
+                // Filtrar cursos por institución si es posible
+                if (Array.isArray(lista) && lista.length > 0) {
+                  const antesFiltro = lista.length;
+                  lista = lista.filter((curso: any) => {
+                    const cursoInstitucionId = curso?.institucionId || curso?.institucion_id || curso?.institucion?.id;
+                    return !cursoInstitucionId || cursoInstitucionId === instId;
+                  });
+                  console.log('[DEBUG][Orientador] Filtrado por institución:', { 
+                    antes: antesFiltro, 
+                    despues: lista.length,
+                    instId 
+                  });
+                }
+                
+                try { console.log('[Cursos][Orientador] recibidos:', { instId, cantidad: lista.length, muestra: lista.slice(0,3) }); } catch {}
+                return lista;
+              } catch (error) {
+                console.error('Error obteniendo cursos para orientador:', error);
+                return [];
               }
-              try { console.log('[Cursos][Orientador] recibidos:', { instId, cantidad: lista.length, muestra: lista.slice(0,3) }); } catch {}
-              return lista;
             }
-            // Docente: cursos propios
-            return await listarCursos();
+            // Docente: cursos propios (ya está filtrado en listarCursos)
+            console.log('[DEBUG][Docente] Obteniendo cursos del docente');
+            const cursosDocente = await listarCursos();
+            console.log('[DEBUG][Docente] Cursos obtenidos:', { cantidad: cursosDocente.length });
+            return cursosDocente;
           })(),
           listarPeriodos()
         ]);
 
         setTareasBanco(Array.isArray(tareas) ? tareas : []);
         const cursosNorm = Array.isArray(cursosDocenteOrAll)
-          ? cursosDocenteOrAll.map((c: any) => {
-              const id = Number(c?.id ?? c?.cursoId ?? c?.curso_id ?? 0);
-              const gradoNombre = c?.grado?.nombre || c?.gradoNombre || c?.grado_nombre || c?.gradoDescripcion || c?.grado?.descripcion || c?.grado;
-              const grupo = c?.grupo?.nombre || c?.grupoNombre || c?.grupo || c?.letra || c?.paralelo || c?.seccion;
-              const nombreDerivado = [gradoNombre, grupo].filter(Boolean).join(' ');
-              const nombre = c?.nombre || c?.nombreCurso || c?.nombre_curso || c?.nombreCompleto || c?.nombre_completo || nombreDerivado || (gradoNombre || grupo) || (id ? `Curso #${id}` : 'Curso');
-              return { id, nombre };
-            })
+          ? cursosDocenteOrAll
+              .map((c: any) => {
+                // Extraer ID desde múltiples posibles campos del backend
+                const idRaw =
+                  c?.id ??
+                  c?.cursoId ??
+                  c?.curso_id ??
+                  c?.idCurso ??
+                  c?.id_curso ??
+                  c?.curso?.id ??
+                  c?.pivot?.cursoId ??
+                  0;
+                const id = Number(idRaw) || 0;
+
+                const gradoNombre = c?.grado?.nombre || c?.gradoNombre || c?.grado_nombre || c?.gradoDescripcion || c?.grado?.descripcion || c?.grado;
+                const grupo = c?.grupo?.nombre || c?.grupoNombre || c?.grupo || c?.letra || c?.paralelo || c?.seccion;
+                const nombreDerivado = [gradoNombre, grupo].filter(Boolean).join(' ');
+                const nombre = c?.nombre || c?.nombreCurso || c?.nombre_curso || c?.nombreCompleto || c?.nombre_completo || nombreDerivado || (gradoNombre || grupo) || (id ? `Curso #${id}` : 'Curso');
+                return { id, nombre };
+              })
+              // Evitar elementos sin ID válido (previene colisión de keys y selección inválida)
+              .filter((c: any) => Number.isFinite(c.id) && c.id > 0)
+              // Asegurar IDs únicos
+              .filter((c: any, idx: number, arr: any[]) => arr.findIndex(x => x.id === c.id) === idx)
           : [];
         try { console.log('[Cursos] normalizados:', { cantidad: cursosNorm.length, muestra: cursosNorm.slice(0,3) }); } catch {}
         setCursos(cursosNorm);

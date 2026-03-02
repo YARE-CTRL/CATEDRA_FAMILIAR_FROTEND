@@ -29,7 +29,12 @@ export default function EspecialesListPage(){
       ]);
       const resAny: any = res as any;
       const list = Array.isArray(resAny?.data) ? resAny.data : (Array.isArray(resAny?.data?.data) ? resAny.data.data : (Array.isArray(resAny) ? resAny : []));
-      const specials = (list as any[]).filter((a: any) => a?.esIndividual === true);
+      // Incluir especiales aunque el backend no envíe explícitamente esIndividual
+      const specials = (list as any[]).filter((a: any) => {
+        const flag = a?.esIndividual === true || a?.es_individual === true;
+        const noCurso = (a?.cursoId == null || a?.cursoId === 0) && (!(Array.isArray(a?.cursoIds)) || a.cursoIds.length === 0);
+        return flag || noCurso;
+      });
       if (Array.isArray(pers)) setPeriodos(pers as PeriodoBackend[]);
 
       const parseDate = (s?: string) => {

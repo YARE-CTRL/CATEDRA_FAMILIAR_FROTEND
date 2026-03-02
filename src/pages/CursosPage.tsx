@@ -84,12 +84,47 @@ export default function CursosPage() {
   const loadData = async () => {
     setLoading(true);
     try {
+      const session = getSession();
+      const user = session?.user;
+      const userInstitucionId = user?.institucionId || (session as any)?.context?.institucionId;
+      
+      console.log('[DEBUG][CursosPage] Usuario:', {
+        rol: user?.rol,
+        id: user?.id,
+        institucionId: userInstitucionId
+      });
+
       const [cursosData, gradosData, docentesData] = await Promise.all([
         getCursosCRUD(),
         getGradosCRUD(),
         getDocentesCRUD()
       ]);
-      setCursos(cursosData);
+      
+      // Filtrar cursos por institución del usuario
+      const cursosFiltrados = Array.isArray(cursosData) 
+        ? cursosData.filter((curso: any) => {
+            const cursoInstitucionId = curso?.institucionId || curso?.institucion_id || curso?.institucion?.id;
+            const pasa = !cursoInstitucionId || cursoInstitucionId === userInstitucionId;
+            
+            console.log('[DEBUG][CursosPage] Filtrando curso:', {
+              id: curso.id,
+              nombre: curso.nombre,
+              cursoInstitucionId,
+              userInstitucionId,
+              pasa
+            });
+            
+            return pasa;
+          })
+        : [];
+
+      console.log('[DEBUG][CursosPage] Cursos:', {
+        total: cursosData?.length || 0,
+        filtrados: cursosFiltrados.length,
+        institucionId: userInstitucionId
+      });
+
+      setCursos(cursosFiltrados);
       setGrados(gradosData);
       setDocentes(docentesData);
     } catch (error) {
@@ -200,7 +235,7 @@ export default function CursosPage() {
   // Filtrar cursos
   const cursosFiltrados = cursos.filter(c => {
     const matchBusqueda = c.nombre.toLowerCase().includes(busqueda.toLowerCase());
-    const matchJornada = filtroJornada === 'todas' || c.jornada === filtroJornada;
+    const matchJornada = filtroJornada === 'todas' || c.jornada.toLowerCase() === filtroJornada.toLowerCase();
     const matchGrado = !filtroGrado || c.gradoId === filtroGrado || c.grado?.id === filtroGrado;
     
     return matchBusqueda && matchJornada && matchGrado;
@@ -274,7 +309,8 @@ export default function CursosPage() {
               className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500"
             >
               <option value="todas">Todas las jornadas</option>
-              <option value="Mañana">Mañana</option>
+              <option value="mañana">Mañana</option>
+                
               <option value="Tarde">Tarde</option>
               <option value="Completa">Completa</option>
             </select>
@@ -339,6 +375,7 @@ export default function CursosPage() {
                   <div className="flex items-center gap-2 text-sm text-gray-600">
                     <IconUsers className="w-4 h-4" />
                     <span>{curso.totalEstudiantes || 0} estudiantes</span>
+                    
                   </div>
                   {(curso.docente || curso.docenteId) && (
                     <div className="flex items-center gap-2 text-sm text-gray-600">
