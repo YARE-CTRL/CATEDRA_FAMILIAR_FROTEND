@@ -125,8 +125,8 @@ export default function CursosPage() {
       });
 
       setCursos(cursosFiltrados);
-      setGrados(gradosData);
-      setDocentes(docentesData);
+      setGrados(Array.isArray(gradosData) ? gradosData : []);
+      setDocentes(Array.isArray(docentesData) ? docentesData : []);
     } catch (error) {
       console.error('Error cargando datos:', error);
       showToast('error', 'Error al cargar los datos');
@@ -144,7 +144,7 @@ export default function CursosPage() {
     setEditingCurso(null);
     setFormCurso({
       nombre: '',
-      gradoId: grados[0]?.id || 0,
+      gradoId: (Array.isArray(grados) && grados.length > 0) ? grados[0].id : 0,
       jornada: 'Mañana',
       docenteId: undefined
     });
@@ -309,7 +309,7 @@ export default function CursosPage() {
               className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500"
             >
               <option value="todas">Todas las jornadas</option>
-              <option value="mañana">Mañana</option>
+              <option value="Mañana">Mañana</option>
                 
               <option value="Tarde">Tarde</option>
               <option value="Completa">Completa</option>
@@ -320,7 +320,7 @@ export default function CursosPage() {
               className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500"
             >
               <option value="">Todos los grados</option>
-              {grados.map(g => (
+              {Array.isArray(grados) && grados.map(g => (
                 <option key={g.id} value={g.id}>{g.nombre}</option>
               ))}
             </select>
@@ -440,7 +440,7 @@ export default function CursosPage() {
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500"
             >
               <option value={0}>Seleccionar grado...</option>
-              {grados.map(g => (
+              {Array.isArray(grados) && grados.map(g => (
                 <option key={g.id} value={g.id}>{g.nombre}</option>
               ))}
             </select>
@@ -477,7 +477,7 @@ export default function CursosPage() {
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500"
             >
               <option value="">Sin docente asignado</option>
-              {docentes.map(d => (
+              {Array.isArray(docentes) && docentes.map(d => (
                 <option key={d.id} value={d.id}>{d.nombre} {d.apellido}</option>
               ))}
             </select>

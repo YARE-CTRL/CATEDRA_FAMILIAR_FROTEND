@@ -7,7 +7,7 @@ import FormFieldInput from '../components/ui/FormFieldInput';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/ui/ToastGlobal';
 import EmptyState404 from '../components/ui/EmptyState404';
-import { listarBancoTareas, listarCursos, listarPeriodos, crearAsignacion, crearAsignacionOrientador, updateBancoTarea, deleteBancoTarea, crearAsignacionEspecial, crearAsignacionOrientadorEspecial, listarEstudiantesDocente, type BancoTareaBackend, type CursoBackend, type PeriodoBackend } from '../api/docentes';
+import { listarBancoTareas, listarBancoTareasDocenteInstitucion, listarCursos, listarPeriodos, crearAsignacion, crearAsignacionOrientador, updateBancoTarea, deleteBancoTarea, crearAsignacionEspecial, crearAsignacionOrientadorEspecial, listarEstudiantesDocente, type BancoTareaBackend, type CursoBackend, type PeriodoBackend } from '../api/docentes';
 import { getCursosPorInstitucion, getGradosPublic, getEstudiantesInstitucionOrientador } from '../api/endpointsDocente-orinetador';
 import { getSession } from '../api/endpoints';
 
@@ -15,6 +15,7 @@ export default function BancoTareasDocentePage(){
   const { showToast } = useToast();
   const navigate = useNavigate();
   const [items, setItems] = useState<BancoTareaBackend[]>([]);
+  const [institutionTaskIds, setInstitutionTaskIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
@@ -24,6 +25,7 @@ export default function BancoTareasDocentePage(){
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [soloConRecurso, setSoloConRecurso] = useState<boolean>(false);
   const [orden, setOrden] = useState<'recientes' | 'usos' | 'titulo'>('recientes');
+  const [bankTab, setBankTab] = useState<'mias' | 'otras'>('mias');
 
   const [cursos, setCursos] = useState<CursoBackend[]>([]);
   const [periodos, setPeriodos] = useState<PeriodoBackend[]>([]);
@@ -70,9 +72,74 @@ export default function BancoTareasDocentePage(){
     return url.startsWith('http') ? url : `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
   };
 
+  const normalizeCursos = (raw: any): CursoBackend[] => {
+    const list = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.data)
+        ? raw.data
+        : Array.isArray(raw?.cursos)
+          ? raw.cursos
+          : Array.isArray(raw?.items)
+            ? raw.items
+            : Array.isArray(raw?.data?.data)
+              ? raw.data.data
+              : Array.isArray(raw?.data?.cursos)
+                ? raw.data.cursos
+                : [];
+
+    return list
+      .map((c: any) => {
+        const idRaw =
+          c?.id ??
+          c?.cursoId ??
+          c?.curso_id ??
+          c?.idCurso ??
+          c?.id_curso ??
+          c?.curso?.id ??
+          c?.pivot?.cursoId ??
+          0;
+        const id = Number(idRaw) || 0;
+        const gradoNombre = c?.grado?.nombre || c?.gradoNombre || c?.grado_nombre || c?.gradoDescripcion || c?.grado?.descripcion || c?.grado;
+        const grupo = c?.grupo?.nombre || c?.grupoNombre || c?.grupo || c?.letra || c?.paralelo || c?.seccion;
+        const nombreDerivado = [gradoNombre, grupo].filter(Boolean).join(' ');
+        const nombre = c?.nombre || c?.nombreCurso || c?.nombre_curso || c?.nombreCompleto || c?.nombre_completo || c?.name || c?.curso?.nombre || nombreDerivado || (gradoNombre || grupo) || (id ? `Curso #${id}` : 'Curso');
+        return {
+          ...c,
+          id,
+          nombre
+        };
+      })
+      .filter((c: any) => Number.isFinite(c.id) && c.id > 0)
+      .filter((c: any, index: number, arr: any[]) => arr.findIndex((x: any) => x.id === c.id) === index);
+  };
+
+  const normalizeBancoTareas = (raw: any): BancoTareaBackend[] => {
+    if (Array.isArray(raw)) return raw as BancoTareaBackend[];
+    if (Array.isArray(raw?.data?.data)) return raw.data.data as BancoTareaBackend[];
+    if (Array.isArray(raw?.data)) return raw.data as BancoTareaBackend[];
+    if (Array.isArray(raw?.items)) return raw.items as BancoTareaBackend[];
+    if (Array.isArray(raw?.tareas)) return raw.tareas as BancoTareaBackend[];
+    if (Array.isArray(raw?.data?.tareas)) return raw.data.tareas as BancoTareaBackend[];
+    return [];
+  };
+
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const base = items.filter(t => {
+    const instId = (session as any)?.user?.institucionId || (session as any)?.context?.institucionId || 0;
+    const institutionSet = new Set(institutionTaskIds);
+    const isDocente = session?.user?.rol === 'docente_aula';
+    const baseInst = items.filter((t: any) => {
+      if (isDocente) {
+        const belongsToInstitution = institutionSet.has(Number((t as any)?.id));
+        return bankTab === 'mias' ? belongsToInstitution : !belongsToInstitution;
+      }
+      const rawTid = (t as any)?.institucionId ?? (t as any)?.institucion_id ?? (t as any)?.institucion?.id ?? null;
+      const tid = rawTid == null || rawTid === '' ? null : Number(rawTid);
+      if (!instId) return bankTab === 'mias';
+      if (bankTab === 'mias') return tid === Number(instId);
+      return tid == null || tid !== Number(instId);
+    });
+    const base = baseInst.filter(t => {
       const byQ = term ? (`${t.titulo} ${t.descripcion} ${t.tema ?? ''}`).toLowerCase().includes(term) : true;
       const byCat = categoriaId ? t.categoriaId === categoriaId : true;
       const hasRecurso = Boolean((t as any)?.enlace);
@@ -92,7 +159,7 @@ export default function BancoTareasDocentePage(){
       return fb - fa;
     });
     return arr;
-  }, [items, q, categoriaId, soloConRecurso, orden]);
+  }, [items, q, categoriaId, soloConRecurso, orden, bankTab, session, institutionTaskIds]);
 
   const IconEye = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
@@ -128,10 +195,47 @@ export default function BancoTareasDocentePage(){
     setError(null);
     try {
       const isOrientador = session?.user?.rol === 'orientador';
+      const isDocente = session?.user?.rol === 'docente_aula';
       const instId = (session as any)?.user?.institucionId || (session as any)?.context?.institucionId || 0;
 
-      const [tareas, cursosRes, periodosRes] = await Promise.all([
-        listarBancoTareas(),
+      const [tareasRes, cursosRes, periodosRes] = await Promise.all([
+        (async () => {
+          if (isDocente) {
+            const [generalTasksRes, institucionRes] = await Promise.all([
+              listarBancoTareas().catch(() => [] as any[]),
+              listarBancoTareasDocenteInstitucion().catch(() => ({ docente: undefined, institucion: undefined, totalTareas: 0, tareas: [] as any[] }))
+            ]);
+
+            const generalTasks = normalizeBancoTareas(generalTasksRes);
+            const institucionTasks = Array.isArray(institucionRes?.tareas) ? institucionRes.tareas : [];
+            const institucionInfo = institucionRes?.institucion;
+            const institucionTaskIds = new Set(institucionTasks.map((t: any) => Number(t?.id)).filter((id: number) => Number.isFinite(id)));
+            setInstitutionTaskIds(Array.from(institucionTaskIds));
+
+            const mergedTasks = [
+              ...institucionTasks,
+              ...generalTasks.filter((t: any) => !institucionTaskIds.has(Number(t?.id)))
+            ];
+
+            return mergedTasks.map((t: any) => {
+              const rawTid = t?.institucionId ?? t?.institucion_id ?? t?.institucion?.id;
+              if (rawTid != null && rawTid !== '') return t;
+              if (institucionTaskIds.has(Number(t?.id))) {
+                const resolvedInstId = institucionInfo?.id ?? Number(instId) ?? undefined;
+                return {
+                  ...t,
+                  institucionId: resolvedInstId,
+                  institucion_id: resolvedInstId,
+                  institucion: institucionInfo,
+                  institucion_nombre: institucionInfo?.nombre ?? t?.institucion_nombre
+                };
+              }
+              return t;
+            });
+          }
+          setInstitutionTaskIds([]);
+          return await listarBancoTareas();
+        })(),
         (async () => {
           if (isOrientador) {
             // 1) Preferir /grados y aplanar cursos
@@ -139,25 +243,27 @@ export default function BancoTareasDocentePage(){
               const gradosRes = await getGradosPublic();
               if (gradosRes.success && Array.isArray(gradosRes.data) && gradosRes.data.length) {
                 const flat = gradosRes.data
-                  .flatMap((g: any) => Array.isArray(g?.cursos) ? g.cursos.map((c: any) => ({ ...c, _grado: g })) : [])
-                  .filter((c: any) => !instId || !c.institucionId || c.institucionId === instId)
-                  .map((c: any) => ({ id: Number(c.id), nombre: c.nombre || `Curso #${c.id}` })) as CursoBackend[];
+                  .flatMap((g: any) => {
+                    const cursosGrado = normalizeCursos(g?.cursos ?? g?.data?.cursos ?? []);
+                    return cursosGrado.map((c: any) => ({ ...c, institucionId: g?.institucionId ?? g?.institucion_id ?? c?.institucionId }));
+                  })
+                  .filter((c: any) => !instId || !c.institucionId || Number(c.institucionId) === Number(instId)) as CursoBackend[];
                 if (flat.length) return flat;
               }
             } catch {}
             // 2) Fallback: /cursos/institucion/:id
             try {
               const r = await getCursosPorInstitucion(Number(instId || 0));
-              const data = Array.isArray(r?.data) ? r.data : [];
-              return data.map((c: any) => ({ id: Number(c.id), nombre: c.nombre || `Curso #${c.id}` })) as CursoBackend[];
+              const data = normalizeCursos(r?.data);
+              if (data.length) return data;
             } catch {}
           }
           // Docente o fallback
-          return await listarCursos();
+          return normalizeCursos(await listarCursos());
         })(),
         listarPeriodos(),
       ]);
-      setItems(Array.isArray(tareas) ? tareas : []);
+      setItems(Array.isArray(tareasRes) ? tareasRes : []);
       setCursos(Array.isArray(cursosRes) ? cursosRes : []);
       setPeriodos(Array.isArray(periodosRes) ? periodosRes : []);
     } catch (e: any) {
@@ -347,6 +453,20 @@ export default function BancoTareasDocentePage(){
             <div>
               <h1 className="text-2xl md:text-3xl font-display font-bold text-slate-800">Banco de Tareas</h1>
               <p className="text-slate-600 mt-1 text-sm">Selecciona una tarea y asígnala a tus cursos, agregando recursos de apoyo.</p>
+              <div className="mt-3 inline-flex rounded-xl border-2 border-slate-200 overflow-hidden">
+                <button
+                  className={`px-4 py-2 text-sm font-medium ${bankTab==='mias' ? 'bg-white text-teal-700' : 'bg-slate-100 text-slate-700'} hover:bg-white`}
+                  onClick={()=> { setBankTab('mias'); setQ(''); setCategoriaId(''); setSoloConRecurso(false); setPage(1); }}
+                >
+                  Mi institución
+                </button>
+                <button
+                  className={`px-4 py-2 text-sm font-medium border-l-2 border-slate-200 ${bankTab==='otras' ? 'bg-white text-teal-700' : 'bg-slate-100 text-slate-700'} hover:bg-white`}
+                  onClick={()=> { setBankTab('otras'); setQ(''); setCategoriaId(''); setSoloConRecurso(false); setPage(1); }}
+                >
+                  Otras instituciones
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <input
@@ -448,6 +568,9 @@ export default function BancoTareasDocentePage(){
                             {t.tema && (
                               <span className="px-2 py-1 rounded bg-purple-100 text-purple-700 font-medium">{t.tema}</span>
                             )}
+                            {(t as any)?.institucion?.nombre && (
+                              <span className="px-2 py-1 rounded bg-sky-100 text-sky-700 font-medium">{(t as any).institucion.nombre}</span>
+                            )}
                             {hasRecurso && (
                               <span className="px-2 py-1 rounded bg-emerald-100 text-emerald-700 font-medium">Recurso sugerido</span>
                             )}
@@ -478,6 +601,7 @@ export default function BancoTareasDocentePage(){
                       <tr>
                         <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Título</th>
                         <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Tema</th>
+                        <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Institución</th>
                         <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Descripción</th>
                         <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Recurso</th>
                         <th className="text-left text-xs font-semibold text-slate-600 px-4 py-3">Usos</th>
@@ -492,6 +616,7 @@ export default function BancoTareasDocentePage(){
                           <tr key={t.id} className="border-t border-slate-100">
                             <td className="px-4 py-3 font-medium text-slate-800">{t.titulo}</td>
                             <td className="px-4 py-3 text-slate-700">{t.tema ? <span className="px-2 py-0.5 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 text-xs">{t.tema}</span> : '-'}</td>
+                            <td className="px-4 py-3 text-slate-700">{(t as any)?.institucion?.nombre || '-'}</td>
                             <td className="px-4 py-3 text-slate-600"><div className="line-clamp-2 max-w-[380px]">{t.descripcion}</div></td>
                             <td className="px-4 py-3 text-slate-700">{hasRecurso ? <button className="text-teal-600 underline" onClick={()=> { setPreviewItem(t); setPreviewOpen(true); }}>Ver recurso</button> : '-'}</td>
                             <td className="px-4 py-3 text-slate-700">{usos}</td>

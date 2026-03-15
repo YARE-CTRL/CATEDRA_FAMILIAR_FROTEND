@@ -13,7 +13,7 @@ export default function AcudienteHijosPage(){
     const val = Number(estudianteId);
     if (!val || Number.isNaN(val)) { alert('Ingresa un ID de estudiante válido'); return; }
     try { localStorage.setItem('acudiente_estudiante_id', String(val)); } catch {}
-    navigate(`/acudiente/estudiantes/${val}/tareas`);
+    navigate('/dashboard/acudiente');
   };
 
   return (

@@ -5,8 +5,11 @@ import {
   crearDocente,
   actualizarDocente,
   eliminarDocente,
-  getCursosCRUD
+  getCursosCRUD,
+  getGradosCRUD,
+  getCursosOrientador
 } from '../api/endpoints';
+import { getGradosPublic } from '../api/endpointsDocente-orinetador';
 import httpService from '../api/httpService';
 import DashboardLayout from '../components/DashboardLayout';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
@@ -25,16 +28,22 @@ import {
 
 interface Docente {
   id: number;
-  nombre: string;
-  apellido: string;
+  nombres: string;
+  apellidos: string;
   correo: string;
   telefono?: string;
-  institucionId: number;
-  estaActivo: boolean;
-  cursos?: { id: number; nombre: string }[];
+  cursos: { id: number; nombre: string; es_director: boolean }[];
+  cantidadCursos: number;
+  estado: 'Activo' | 'Inactivo';
+  esDirector: boolean;
 }
 
 interface Curso {
+  id: number;
+  nombre: string;
+}
+
+interface Grado {
   id: number;
   nombre: string;
 }
@@ -46,6 +55,7 @@ export default function DocentesPage() {
   const [loading, setLoading] = useState(true);
   const [docentes, setDocentes] = useState<Docente[]>([]);
   const [cursos, setCursos] = useState<Curso[]>([]);
+  const [grados, setGrados] = useState<Grado[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [filtroActivo, setFiltroActivo] = useState<'todos' | 'activos' | 'inactivos'>('todos');
   // Generar contraseña sugerida para docente
@@ -66,14 +76,29 @@ export default function DocentesPage() {
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   
   // Formulario
-  const [formDocente, setFormDocente] = useState({
+  const [formData, setFormData] = useState({
+    nombres: '',
+    apellidos: '',
     correo: '',
-    contrasena: generarContrasenaDocente(),
+    telefono: '',
+    contrasena: '',
+    confirmarContrasena: '',
+    estaActivo: true,
+    gradoAsignado: '',
+    areaQueOrienta: '',
+    centroInteres: '',
+    institucionId: (user?.institucionId as number) || 1,
+    cursoIds: [] as number[]
+  });
+
+  // Formulario para el modal (formDocene)
+  const [formDocene, setFormDocene] = useState({
+    correo: '',
+    contrasena: '',
     nombre: '',
     apellido: '',
     numeroDocumento: '',
     telefono: '',
-    // Campos extendidos según contrato backend
     tipoDocumento: 'CC',
     telefonoEmergencia: '',
     personaEmergencia: '',
@@ -114,6 +139,18 @@ export default function DocentesPage() {
             datos: docentesData?.slice(0, 3),
             estructura: Object.keys(result || {})
           });
+          
+          // El endpoint /orientadores/docentes ya filtra por institución, no need to filter again
+          console.log('[DEBUG][DocentesPage] Docentes ya filtrados por institución:', {
+            cantidad: docentesData?.length || 0,
+            muestra: docentesData?.slice(0, 2).map(d => ({
+              id: d.id,
+              nombres: d.nombres,
+              apellidos: d.apellidos,
+              correo: d.correo,
+              estado: d.estado
+            }))
+          });
         } catch (error) {
           console.log('[DEBUG][DocentesPage] Error con /orientadores/docentes, usando fallback:', error);
           // Fallback al endpoint general
@@ -123,31 +160,34 @@ export default function DocentesPage() {
         docentesData = await getDocentesCRUD();
       }
 
-      console.log('[DEBUG][DocentesPage] Docentes recibidos:', {
+      console.log('[DEBUG][DocentesPage] Docentes finales:', {
         cantidad: docentesData?.length || 0,
         datos: docentesData?.slice(0, 3),
         tipo: typeof docentesData
       });
 
-      // Filtrar docentes por institución del usuario
+      // Para orientadores, no filtrar ya que /orientadores/docentes ya filtra por institución
+      // Para otros roles, mantener el filtrado existente
       const userInstitucionId = user?.institucionId || (session as any)?.context?.institucionId;
-      const filtrados = userInstitucionId
-        ? docentesData.filter((d: any) => {
-            const docenteInstitucionId = d?.institucionId || d?.institucion_id || d?.institucion?.id;
-            const pasa = Number(docenteInstitucionId) === Number(userInstitucionId);
-            
-            console.log('[DEBUG][DocentesPage] Filtrando docente:', {
-              id: d.id,
-              nombre: d.nombre,
-              apellido: d.apellido,
-              docenteInstitucionId,
-              userInstitucionId,
-              pasa
-            });
-            
-            return pasa;
-          })
-        : docentesData;
+      const filtrados = user?.rol === 'orientador' 
+        ? docentesData  // Ya filtrados por el endpoint
+        : userInstitucionId
+          ? docentesData.filter((d: any) => {
+              const docenteInstitucionId = d?.institucionId || d?.institucion_id || d?.institucion?.id;
+              const pasa = Number(docenteInstitucionId) === Number(userInstitucionId);
+              
+              console.log('[DEBUG][DocentesPage] Filtrando docente (no orientador):', {
+                id: d.id,
+                nombre: d.nombre || d.nombres,
+                apellido: d.apellido || d.apellidos,
+                docenteInstitucionId,
+                userInstitucionId,
+                pasa
+              });
+              
+              return pasa;
+            })
+          : docentesData;
 
       console.log('[DEBUG][DocentesPage] Resultados:', {
         recibidos: Array.isArray(docentesData) ? docentesData.length : 'no-array',
@@ -157,7 +197,38 @@ export default function DocentesPage() {
       });
 
       setDocentes(filtrados);
-      setCursos(await getCursosCRUD());
+      // Cargar cursos: si es orientador, usar su endpoint y filtrar por su institución como segunda barrera
+      const instId = Number(userInstitucionId);
+      if (user?.rol === 'orientador') {
+        try {
+          const cursosOri = await getCursosOrientador();
+          const soloMiInst = Array.isArray(cursosOri)
+            ? cursosOri.filter((c: any) => Number(c?.institucionId || c?.institucion_id || c?.institucion?.id) === instId)
+            : [];
+          setCursos(soloMiInst);
+        } catch (e) {
+          const all = await getCursosCRUD();
+          const soloMiInst = Array.isArray(all)
+            ? all.filter((c: any) => Number(c?.institucionId || c?.institucion_id || c?.institucion?.id) === instId)
+            : [];
+          setCursos(soloMiInst);
+        }
+      } else {
+        setCursos(await getCursosCRUD());
+      }
+
+      try {
+        const gradosRes = await getGradosPublic();
+        const gradosData = gradosRes.success && Array.isArray(gradosRes.data) ? gradosRes.data : [];
+        const soloMiInst = gradosData.filter((g: any) => Number(g?.institucionId || g?.institucion_id || g?.institucion?.id || instId) === instId);
+        setGrados(soloMiInst.map((g: any) => ({ id: Number(g.id), nombre: g.nombre || g.name || `Grado ${g.id}` })));
+      } catch (e) {
+        const allGrados = await getGradosCRUD();
+        const soloMiInst = Array.isArray(allGrados)
+          ? allGrados.filter((g: any) => Number(g?.institucionId || g?.institucion_id || g?.institucion?.id) === instId)
+          : [];
+        setGrados(soloMiInst.map((g: any) => ({ id: Number(g.id), nombre: g.nombre || g.name || `Grado ${g.id}` })));
+      }
     } catch (error) {
       console.error('Error cargando datos:', error);
       showToast('error', 'Error al cargar los datos');
@@ -173,7 +244,7 @@ export default function DocentesPage() {
 
   const handleOpenCreate = () => {
     setEditingDocente(null);
-    setFormDocente({
+    setFormDocene({
       correo: '',
       contrasena: generarContrasenaDocente(),
       nombre: '',
@@ -196,7 +267,7 @@ export default function DocentesPage() {
 
   const handleOpenEdit = (docente: Docente) => {
     setEditingDocente(docente);
-    setFormDocente({
+    setFormDocene({
       correo: docente.correo,
       contrasena: '',
       nombre: docente.nombre,
@@ -218,18 +289,32 @@ export default function DocentesPage() {
   };
 
   const handleSaveDocente = async () => {
-    if (!formDocente.nombre.trim() || !formDocente.apellido.trim() || !formDocente.correo.trim()) {
+    if (!formDocene.nombre.trim() || !formDocene.apellido.trim() || !formDocene.correo.trim()) {
       showToast('error', 'Nombre, apellido y correo son obligatorios');
       return;
     }
 
-    if (!editingDocente && !formDocente.numeroDocumento.trim()) {
+    if (!editingDocente && !formDocene.numeroDocumento.trim()) {
       showToast('error', 'El número de documento es obligatorio para nuevos docentes');
       return;
     }
 
-    if (!editingDocente && !formDocente.contrasena) {
+    if (!editingDocente && !formDocene.contrasena) {
       showToast('error', 'La contraseña es obligatoria para nuevos docentes');
+      return;
+    }
+
+    // Verificación de autenticación antes de enviar
+    try {
+      const sessionRaw = localStorage.getItem('session');
+      const sessionParsed = sessionRaw ? JSON.parse(sessionRaw) : null;
+      const token = sessionParsed?.token;
+      if (!token || typeof token !== 'string' || token.length < 10) {
+        showToast('error', 'Sesión no autenticada. Por favor inicia sesión nuevamente.');
+        return;
+      }
+    } catch {
+      showToast('error', 'Sesión no autenticada. Por favor inicia sesión nuevamente.');
       return;
     }
 
@@ -237,10 +322,10 @@ export default function DocentesPage() {
     try {
       if (editingDocente) {
         const result = await actualizarDocente(editingDocente.id, {
-          nombre: formDocente.nombre,
-          apellido: formDocente.apellido,
-          telefono: formDocente.telefono || undefined,
-          cursoIds: formDocente.cursoIds.length > 0 ? formDocente.cursoIds : undefined
+          nombre: formDocene.nombre,
+          apellido: formDocene.apellido,
+          telefono: formDocene.telefono || undefined,
+          cursoIds: formDocene.cursoIds.length > 0 ? formDocene.cursoIds : undefined
         });
         if (result.success) {
           showToast('success', 'Docente actualizado correctamente');
@@ -251,29 +336,39 @@ export default function DocentesPage() {
         }
       } else {
         const gradoAsignadoValue: any = (() => {
-          const n = Number(formDocente.gradoAsignado);
-          return Number.isFinite(n) && !isNaN(n) ? n : formDocente.gradoAsignado;
+          const n = Number(formDocene.gradoAsignado);
+          return Number.isFinite(n) && !isNaN(n) ? n : formDocene.gradoAsignado;
+        })();
+        // Seguridad en cliente: si es orientador, limitar cursoIds a los que están cargados (su institución)
+        const allowedCursoIds = (() => {
+          if (user?.rol === 'orientador') {
+            const allowed = new Set((cursos || []).map(c => c.id));
+            return (formDocene.cursoIds || []).filter(id => allowed.has(id));
+          }
+          return formDocene.cursoIds || [];
         })();
         const crearPayload = {
-          correo: formDocente.correo,
-          contrasena: formDocente.contrasena,
-          nombre: formDocente.nombre,
-          apellido: formDocente.apellido,
+          correo: formDocene.correo,
+          contrasena: formDocene.contrasena,
+          nombre: formDocene.nombre,
+          apellido: formDocene.apellido,
           // Campos duplicados para compatibilidad con backend: usar nombres/apellidos
-          nombres: formDocente.nombre,
-          apellidos: formDocente.apellido,
-          numeroDocumento: formDocente.numeroDocumento,
-          telefono: formDocente.telefono || undefined,
-          institucionId: Number(formDocente.institucionId) || (user?.institucionId as number) || 1,
-          cursoIds: formDocente.cursoIds.length > 0 ? formDocente.cursoIds : undefined,
-          tipoDocumento: formDocente.tipoDocumento,
-          telefonoEmergencia: formDocente.telefonoEmergencia || undefined,
-          personaEmergencia: formDocente.personaEmergencia || undefined,
-          direccion: formDocente.direccion || undefined,
-          esDirectorGrado: formDocente.esDirectorGrado || undefined,
+          nombres: formDocene.nombre,
+          apellidos: formDocene.apellido,
+          numeroDocumento: formDocene.numeroDocumento,
+          telefono: formDocene.telefono || undefined,
+          institucionId: (user?.rol === 'orientador')
+            ? ((user?.institucionId as number) || Number(formDocene.institucionId) || 1)
+            : (Number(formDocene.institucionId) || (user?.institucionId as number) || 1),
+          cursoIds: allowedCursoIds.length > 0 ? allowedCursoIds : undefined,
+          tipoDocumento: formDocene.tipoDocumento,
+          telefonoEmergencia: formDocene.telefonoEmergencia || undefined,
+          personaEmergencia: formDocene.personaEmergencia || undefined,
+          direccion: formDocene.direccion || undefined,
+          esDirectorGrado: formDocene.esDirectorGrado || undefined,
           gradoAsignado: gradoAsignadoValue || undefined,
-          areaQueOrienta: formDocente.areaQueOrienta || undefined,
-          centroInteres: formDocente.centroInteres || undefined
+          areaQueOrienta: formDocene.areaQueOrienta || undefined,
+          centroInteres: formDocene.centroInteres || undefined
         } as any;
         console.log('[DocentesPage][crearDocente] payload ->', crearPayload);
         const result = await crearDocente(crearPayload);
@@ -286,13 +381,14 @@ export default function DocentesPage() {
           if (dRaw) {
             const docenteNuevo: Docente = {
               id: dRaw.id,
-              nombre: dRaw.nombre || dRaw.nombres || formDocente.nombre,
-              apellido: dRaw.apellido || dRaw.apellidos || formDocente.apellido,
-              correo: body?.usuario?.correo || formDocente.correo,
-              telefono: dRaw.telefono || formDocente.telefono,
-              institucionId: dRaw.institucionId || (user?.institucionId as number) || 1,
-              estaActivo: true,
-              cursos: Array.isArray(dRaw.cursos) ? dRaw.cursos.map((c: any) => ({ id: c.id, nombre: c.nombre })) : []
+              nombres: dRaw.nombres || formDocene.nombre,
+              apellidos: dRaw.apellidos || formDocene.apellido,
+              correo: body?.usuario?.correo || formDocene.correo,
+              telefono: dRaw.telefono || formDocene.telefono,
+              cursos: Array.isArray(dRaw.cursos) ? dRaw.cursos.map((c: any) => ({ id: c.id, nombre: c.nombre, es_director: c.es_director })) : [],
+              cantidadCursos: Array.isArray(dRaw.cursos) ? dRaw.cursos.length : 0,
+              estado: 'Activo',
+              esDirector: false
             };
             setDocentes(prev => [docenteNuevo, ...prev]);
           }
@@ -333,7 +429,7 @@ export default function DocentesPage() {
   };
 
   const toggleCurso = (cursoId: number) => {
-    setFormDocente(prev => ({
+    setFormDocene(prev => ({
       ...prev,
       cursoIds: prev.cursoIds.includes(cursoId)
         ? prev.cursoIds.filter(id => id !== cursoId)
@@ -344,14 +440,14 @@ export default function DocentesPage() {
   // Filtrar docentes
   const docentesFiltrados = docentes.filter(d => {
     const matchBusqueda = 
-      (d.nombre?.toLowerCase().includes(busqueda.toLowerCase()) || '') ||
-      (d.apellido?.toLowerCase().includes(busqueda.toLowerCase()) || '') ||
+      (d.nombres?.toLowerCase().includes(busqueda.toLowerCase()) || '') ||
+      (d.apellidos?.toLowerCase().includes(busqueda.toLowerCase()) || '') ||
       (d.correo?.toLowerCase().includes(busqueda.toLowerCase()) || '');
     
     const matchActivo = 
       filtroActivo === 'todos' ||
-      (filtroActivo === 'activos' && d.estaActivo) ||
-      (filtroActivo === 'inactivos' && !d.estaActivo);
+      (filtroActivo === 'activos' && d.estado === 'Activo') ||
+      (filtroActivo === 'inactivos' && d.estado === 'Inactivo');
     
     return matchBusqueda && matchActivo;
   });
@@ -420,13 +516,13 @@ export default function DocentesPage() {
           <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
             <p className="text-sm text-gray-500">Docentes Activos</p>
             <p className="text-2xl font-bold text-green-600">
-              {docentes.filter(d => d.estaActivo).length}
+              {docentes.filter(d => d.estado === 'Activo').length}
             </p>
           </div>
           <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
             <p className="text-sm text-gray-500">Docentes Inactivos</p>
             <p className="text-2xl font-bold text-red-600">
-              {docentes.filter(d => !d.estaActivo).length}
+              {docentes.filter(d => d.estado === 'Inactivo').length}
             </p>
           </div>
         </div>
@@ -471,12 +567,12 @@ export default function DocentesPage() {
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
                             <span className="text-primary-700 font-semibold">
-                              {(docente.nombre || '?')[0]}{(docente.apellido || '?')[0]}
+                              {(docente.nombres || '?')[0]}{(docente.apellidos || '?')[0]}
                             </span>
                           </div>
                           <div>
                             <p className="font-medium text-gray-900">
-                              {docente.nombre} {docente.apellido}
+                              {docente.nombres} {docente.apellidos}
                             </p>
                           </div>
                         </div>
@@ -487,36 +583,24 @@ export default function DocentesPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                         {docente.telefono || '-'}
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-1">
-                          {docente.cursos && docente.cursos.length > 0 ? (
-                            docente.cursos.slice(0, 2).map(c => (
-                              <span key={c.id} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
-                                {c.nombre}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-gray-400 text-sm">Sin cursos</span>
-                          )}
-                          {docente.cursos && docente.cursos.length > 2 && (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
-                              +{docente.cursos.length - 2}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{docente.cantidadCursos}</span>
+                          {docente.esDirector && (
+                            <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">
+                              Director
                             </span>
                           )}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {docente.estaActivo ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">
-                            <IconCheckCircle className="w-3 h-3" />
-                            Activo
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full">
-                            <IconAlertTriangle className="w-3 h-3" />
-                            Inactivo
-                          </span>
-                        )}
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          docente.estado === 'Activo' 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {docente.estado}
+                        </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -556,16 +640,16 @@ export default function DocentesPage() {
           <div className="grid grid-cols-2 gap-4">
             <FormFieldInput
               label="Nombre"
-              value={formDocente.nombre}
-              onChange={(e) => setFormDocente(prev => ({ ...prev, nombre: e.target.value }))}
+              value={formDocene.nombre}
+              onChange={(e) => setFormDocene(prev => ({ ...prev, nombre: e.target.value }))}
               placeholder="Nombre del docente"
               required name={''}            />
             <FormFieldInput
               label="Apellido"
-              value={formDocente.apellido}
+              value={formDocene.apellido}
               onChange={(e) => {
                 const nuevoApellido = e.target.value;
-                setFormDocente(prev => ({
+                setFormDocene(prev => ({
                   ...prev,
                   apellido: nuevoApellido,
                   // Actualizar contraseña sugerida si no ha sido modificada manualmente
@@ -581,8 +665,8 @@ export default function DocentesPage() {
           <FormFieldInput
             label="Correo electrónico"
             type="email"
-            value={formDocente.correo}
-            onChange={(e) => setFormDocente(prev => ({ ...prev, correo: e.target.value }))}
+            value={formDocene.correo}
+            onChange={(e) => setFormDocene(prev => ({ ...prev, correo: e.target.value }))}
             placeholder="correo@institucion.edu.co"
             required
             disabled={!!editingDocente} name={''}          />
@@ -590,8 +674,8 @@ export default function DocentesPage() {
           <FormFieldInput
             label="Número de Documento"
             type="text"
-            value={formDocente.numeroDocumento}
-            onChange={(e) => setFormDocente(prev => ({ ...prev, numeroDocumento: e.target.value }))}
+            value={formDocene.numeroDocumento}
+            onChange={(e) => setFormDocene(prev => ({ ...prev, numeroDocumento: e.target.value }))}
             placeholder="Documento de identidad"
             required={!editingDocente} name={''}          />
 
@@ -599,8 +683,8 @@ export default function DocentesPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Documento</label>
               <select
-                value={formDocente.tipoDocumento}
-                onChange={(e) => setFormDocente(prev => ({ ...prev, tipoDocumento: e.target.value }))}
+                value={formDocene.tipoDocumento}
+                onChange={(e) => setFormDocene(prev => ({ ...prev, tipoDocumento: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500"
               >
                 <option value="CC">CC</option>
@@ -612,8 +696,8 @@ export default function DocentesPage() {
             <FormFieldInput
               label="Teléfono de Emergencia"
               type="tel"
-              value={formDocente.telefonoEmergencia}
-              onChange={(e) => setFormDocente(prev => ({ ...prev, telefonoEmergencia: e.target.value }))}
+              value={formDocene.telefonoEmergencia}
+              onChange={(e) => setFormDocene(prev => ({ ...prev, telefonoEmergencia: e.target.value }))}
               placeholder="Contacto de emergencia" name={''}            />
           </div>
 
@@ -621,14 +705,14 @@ export default function DocentesPage() {
             <FormFieldInput
               label="Persona de Emergencia"
               type="text"
-              value={formDocente.personaEmergencia}
-              onChange={(e) => setFormDocente(prev => ({ ...prev, personaEmergencia: e.target.value }))}
+              value={formDocene.personaEmergencia}
+              onChange={(e) => setFormDocene(prev => ({ ...prev, personaEmergencia: e.target.value }))}
               placeholder="Nombre del contacto" name={''}            />
             <FormFieldInput
               label="Dirección"
               type="text"
-              value={formDocente.direccion}
-              onChange={(e) => setFormDocente(prev => ({ ...prev, direccion: e.target.value }))}
+              value={formDocene.direccion}
+              onChange={(e) => setFormDocene(prev => ({ ...prev, direccion: e.target.value }))}
               placeholder="Dirección de residencia" name={''}            />
           </div>
 
@@ -636,32 +720,42 @@ export default function DocentesPage() {
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input
                 type="checkbox"
-                checked={formDocente.esDirectorGrado}
-                onChange={(e) => setFormDocente(prev => ({ ...prev, esDirectorGrado: e.target.checked }))}
+                checked={formDocene.esDirectorGrado}
+                onChange={(e) => setFormDocene(prev => ({ ...prev, esDirectorGrado: e.target.checked }))}
                 className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               />
               Es director de grado
             </label>
-            <FormFieldInput
-              label="Grado Asignado"
-              type="text"
-              value={formDocente.gradoAsignado}
-              onChange={(e) => setFormDocente(prev => ({ ...prev, gradoAsignado: e.target.value }))}
-              placeholder="Ej: 5B" name={''}            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Grado Asignado</label>
+              <select
+                value={formDocene.gradoAsignado}
+                onChange={(e) => setFormDocene(prev => ({ ...prev, gradoAsignado: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                disabled={!grados.length}
+              >
+                <option value="">Selecciona un grado</option>
+                {grados.map((grado) => (
+                  <option key={grado.id} value={String(grado.id)}>
+                    {grado.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <FormFieldInput
               label="Área que Orienta"
               type="text"
-              value={formDocente.areaQueOrienta}
-              onChange={(e) => setFormDocente(prev => ({ ...prev, areaQueOrienta: e.target.value }))}
+              value={formDocene.areaQueOrienta}
+              onChange={(e) => setFormDocene(prev => ({ ...prev, areaQueOrienta: e.target.value }))}
               placeholder="Ej: Matemáticas" name={''}            />
             <FormFieldInput
               label="Centro de Interés"
               type="text"
-              value={formDocente.centroInteres}
-              onChange={(e) => setFormDocente(prev => ({ ...prev, centroInteres: e.target.value }))}
+              value={formDocene.centroInteres}
+              onChange={(e) => setFormDocene(prev => ({ ...prev, centroInteres: e.target.value }))}
               placeholder="Ej: Robótica" name={''}            />
           </div>
           
@@ -670,8 +764,8 @@ export default function DocentesPage() {
               <FormFieldInput
                 label="Contraseña Temporal"
                 type="text"
-                value={formDocente.contrasena}
-                onChange={(e) => setFormDocente(prev => ({ ...prev, contrasena: e.target.value }))}
+                value={formDocene.contrasena}
+                onChange={(e) => setFormDocene(prev => ({ ...prev, contrasena: e.target.value }))}
                 placeholder="Contraseña inicial"
                 required name={''}              />
               <p className="text-xs text-gray-500 mt-1">
@@ -683,18 +777,9 @@ export default function DocentesPage() {
           <FormFieldInput
             label="Teléfono"
             type="tel"
-            value={formDocente.telefono}
-            onChange={(e) => setFormDocente(prev => ({ ...prev, telefono: e.target.value }))}
+            value={formDocene.telefono}
+            onChange={(e) => setFormDocene(prev => ({ ...prev, telefono: e.target.value }))}
             placeholder="Número de contacto" name={''}          />
-
-          <FormFieldInput
-            label="Institución ID"
-            type="number"
-            value={String(formDocente.institucionId ?? '')}
-            onChange={(e) => setFormDocente(prev => ({ ...prev, institucionId: Number(e.target.value) }))}
-            placeholder="ID de la institución"
-            name="institucionId"
-          />
           
           {/* Selector de cursos */}
           <div>
@@ -702,27 +787,34 @@ export default function DocentesPage() {
               Asignar Cursos
             </label>
             <div className="border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto">
-              {cursos.length === 0 ? (
-                <p className="text-gray-400 text-sm">No hay cursos disponibles</p>
-              ) : (
-                <div className="space-y-2">
-                  {cursos.map(curso => (
-                    <label key={curso.id} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formDocente.cursoIds.includes(curso.id)}
-                        onChange={() => toggleCurso(curso.id)}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                      />
-                      <span className="text-sm text-gray-700">{curso.nombre}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
+              {(() => {
+                const instIdUser = Number(user?.institucionId || (session as any)?.context?.institucionId || 0);
+                const visibleCursos = Array.isArray(cursos)
+                  ? cursos.filter((c: any) => instIdUser ? Number(c?.institucionId || c?.institucion_id || c?.institucion?.id) === instIdUser : true)
+                  : [];
+                if (visibleCursos.length === 0) {
+                  return <p className="text-gray-400 text-sm">No hay cursos disponibles</p>;
+                }
+                return (
+                  <div className="space-y-2">
+                    {visibleCursos.map((curso: any) => (
+                      <label key={curso.id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formDocene.cursoIds.includes(curso.id)}
+                          onChange={() => toggleCurso(curso.id)}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-sm text-gray-700">{curso.nombre}</span>
+                      </label>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
-            {formDocente.cursoIds.length > 0 && (
+            {formDocene.cursoIds.length > 0 && (
               <p className="mt-1 text-xs text-gray-500">
-                {formDocente.cursoIds.length} curso(s) seleccionado(s)
+                {formDocene.cursoIds.length} curso(s) seleccionado(s)
               </p>
             )}
           </div>

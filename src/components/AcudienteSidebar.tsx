@@ -27,11 +27,11 @@ export default function AcudienteSidebar({ open, onClose }: { open: boolean; onC
   })();
 
   const navItems = useMemo(() => [
-    { path: '/dashboard', label: 'Inicio', icon: 'home' },
-    { path: '/dashboard/acudiente', label: 'Mi Panel', icon: 'dashboard' },
-    { path: '/acudiente/tareas', label: 'Tareas', icon: 'dashboard' },
-    { path: '/acudiente/especiales', label: 'Entregas especiales', icon: 'dashboard' },
-    { path: '/acudiente/perfil', label: 'Mi Perfil', icon: 'dashboard' },
+    { key: 'inicio', path: '/dashboard', label: 'Inicio', icon: 'home' },
+    { key: 'panel', path: '/dashboard/acudiente', label: 'Mi Panel', icon: 'dashboard' },
+    { key: 'tareas', path: '/acudiente/tareas', label: 'Tareas', icon: 'dashboard' },
+    { key: 'especiales', path: '/acudiente/especiales', label: 'Entregas especiales', icon: 'dashboard' },
+    { key: 'perfil', path: '/acudiente/perfil', label: 'Mi Perfil', icon: 'dashboard' },
   ], [preferredEstudianteId]);
 
   const isActive = (path: string) => fullPath === path || location.pathname === path;
@@ -71,7 +71,7 @@ export default function AcudienteSidebar({ open, onClose }: { open: boolean; onC
               const active = isActive(item.path);
               return (
                 <Link
-                  key={item.path}
+                  key={item.key}
                   to={item.path}
                   className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${
                     active

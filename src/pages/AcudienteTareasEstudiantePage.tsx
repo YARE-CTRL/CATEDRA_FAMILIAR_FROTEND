@@ -4,6 +4,8 @@ import { Link, useParams } from 'react-router-dom';
 
 import AcudienteLayout from '../components/AcudienteLayout';
 
+import { getSession } from '../api/endpoints';
+
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 
 import Button from '../components/ui/Button';
@@ -15,6 +17,8 @@ import { listarTareasEstudiante, type TareaAsignadaMovil } from '../api/acudient
 export default function AcudienteTareasEstudiantePage(){
 
   const { id } = useParams();
+
+  const session = getSession();
 
   const estudianteId = Number(id);
 
@@ -34,6 +38,17 @@ export default function AcudienteTareasEstudiantePage(){
 
     if (!estudianteId) return;
 
+    try {
+      console.log('[ACUDIENTE][TAREAS_ESTUDIANTE][LOAD]', {
+        routeId: id,
+        estudianteId,
+        periodo,
+        rol: session?.user?.rol,
+        sessionUserId: session?.user?.id,
+        localPreferredStudentId: localStorage.getItem('acudiente_estudiante_id')
+      });
+    } catch {}
+
     setLoading(true);
 
     setError(null);
@@ -46,6 +61,19 @@ export default function AcudienteTareasEstudiantePage(){
 
     } catch (e: any) {
 
+      try {
+        console.error('[ACUDIENTE][TAREAS_ESTUDIANTE][ERROR]', {
+          routeId: id,
+          estudianteId,
+          periodo,
+          errorMessage: e?.message,
+          errorStatus: e?.status,
+          rol: session?.user?.rol,
+          sessionUserId: session?.user?.id,
+          localPreferredStudentId: localStorage.getItem('acudiente_estudiante_id')
+        });
+      } catch {}
+
       setError(e?.message || 'Error al cargar tareas');
 
     } finally { setLoading(false); }
@@ -57,6 +85,16 @@ export default function AcudienteTareasEstudiantePage(){
   useEffect(() => { load(); }, [estudianteId, periodo]);
 
   useEffect(() => {
+
+    try {
+      console.log('[ACUDIENTE][TAREAS_ESTUDIANTE][MOUNT]', {
+        routeId: id,
+        estudianteId,
+        rol: session?.user?.rol,
+        sessionUserId: session?.user?.id,
+        localPreferredStudentId: localStorage.getItem('acudiente_estudiante_id')
+      });
+    } catch {}
 
     if (estudianteId) {
 

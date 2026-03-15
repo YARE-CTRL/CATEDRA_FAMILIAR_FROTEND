@@ -69,6 +69,23 @@ export async function listarTareasEstudiante(estudianteId: number, opts: { perio
   const params: any = {};
   if (opts.periodo) params.periodo = opts.periodo;
   // Contrato móvil con base /api/movil
+  try {
+    const sessionRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('session') : null;
+    const authToken = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    let parsedSession: any = null;
+    try {
+      parsedSession = sessionRaw ? JSON.parse(sessionRaw) : null;
+    } catch {}
+    console.log('[ACUDIENTE][API][LISTAR_TAREAS_ESTUDIANTE][REQUEST]', {
+      endpoint: `/estudiantes/${estudianteId}/tareas`,
+      estudianteId,
+      params,
+      sessionRole: parsedSession?.user?.rol,
+      sessionUserId: parsedSession?.user?.id,
+      hasSessionToken: Boolean(parsedSession?.token),
+      hasDirectAuthToken: Boolean(authToken)
+    });
+  } catch {}
   const res = await httpService.get(`/estudiantes/${estudianteId}/tareas`, params);
   const body: any = res.data;
   const data = (body && typeof body === 'object' && 'data' in body) ? (body as any).data : body;

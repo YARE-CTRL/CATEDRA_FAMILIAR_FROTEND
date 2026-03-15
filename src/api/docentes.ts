@@ -415,6 +415,29 @@ export async function listarBancoTareas(params?: { page?: number; limit?: number
   return response.data;
 }
 
+export async function listarBancoTareasDocenteGeneral() {
+  const response = await httpService.get<any>('/docentes/mis-cursos');
+  const body = response.data as any;
+  const data = body?.data ?? body;
+  return {
+    docente: data?.docente,
+    totalTareas: Number(data?.totalTareas ?? data?.tareas?.length ?? 0),
+    tareas: Array.isArray(data?.tareas) ? data.tareas : []
+  };
+}
+
+export async function listarBancoTareasDocenteInstitucion() {
+  const response = await httpService.get<any>('/docentes/mis-tareas-institucion');
+  const body = response.data as any;
+  const data = body?.data ?? body;
+  return {
+    docente: data?.docente,
+    institucion: data?.institucion,
+    totalTareas: Number(data?.totalTareas ?? data?.tareas?.length ?? 0),
+    tareas: Array.isArray(data?.tareas) ? data.tareas : []
+  };
+}
+
 // Editar Banco de Tareas (PUT o PATCH). Admitir reemplazo de archivo con PUT vía FormData desde la llamada de UI.
 export async function updateBancoTarea(
   id: number,
@@ -452,10 +475,14 @@ export async function listarPeriodos(params?: { page?: number; limit?: number; a
 export async function listarCursos() {
   const parseCursos = (body: any): CursoBackend[] => {
     if (body && typeof body === 'object') {
+      if (Array.isArray(body.data?.data?.data)) return body.data.data.data as CursoBackend[];
+      if (Array.isArray(body.data?.data?.cursos)) return body.data.data.cursos as CursoBackend[];
+      if (Array.isArray(body.data?.cursos)) return body.data.cursos as CursoBackend[];
       if (Array.isArray(body.data?.data)) return body.data.data as CursoBackend[];
       if (Array.isArray(body.data)) return body.data as CursoBackend[];
       if (Array.isArray(body.cursos)) return body.cursos as CursoBackend[];
       if (Array.isArray(body.items)) return body.items as CursoBackend[];
+      if (Array.isArray(body.results)) return body.results as CursoBackend[];
     }
     return Array.isArray(body) ? (body as CursoBackend[]) : [];
   };

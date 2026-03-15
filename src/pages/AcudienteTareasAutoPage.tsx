@@ -9,29 +9,40 @@ export default function AcudienteTareasAutoPage(){
 
   useEffect(() => {
     const run = async () => {
-      // 1) preferir último usado en localStorage
-      try {
-        const v = localStorage.getItem('acudiente_estudiante_id');
-        if (v) {
-          const id = Number(v);
-          if (id && !Number.isNaN(id)) {
-            navigate(`/acudiente/estudiantes/${id}/tareas`, { replace: true });
-            return;
-          }
-        }
-      } catch {}
-      // 2) pedir al backend lista de hijos y usar el primero
       try {
         const { estudiantes } = await getMisTareasAcudiente();
         if (Array.isArray(estudiantes) && estudiantes.length > 0) {
-          const id = Number(estudiantes[0].id);
-          try { localStorage.setItem('acudiente_estudiante_id', String(id)); } catch {}
-          navigate(`/acudiente/estudiantes/${id}/tareas`, { replace: true });
-          return;
+          const allowedIds = new Set(
+            estudiantes
+              .map((estudiante) => Number(estudiante?.id))
+              .filter((id) => id && !Number.isNaN(id))
+          );
+
+          try {
+            const v = localStorage.getItem('acudiente_estudiante_id');
+            if (v) {
+              const preferredId = Number(v);
+              if (preferredId && !Number.isNaN(preferredId) && allowedIds.has(preferredId)) {
+                navigate(`/acudiente/estudiantes/${preferredId}/tareas`, { replace: true });
+                return;
+              }
+            }
+          } catch {}
+
+          const firstId = Number(estudiantes[0]?.id);
+          if (firstId && !Number.isNaN(firstId)) {
+            try { localStorage.setItem('acudiente_estudiante_id', String(firstId)); } catch {}
+            navigate(`/acudiente/estudiantes/${firstId}/tareas`, { replace: true });
+            return;
+          }
         }
-      } catch {}
-      // 3) fallback a configuración manual
-      navigate('/acudiente/hijos', { replace: true });
+      } catch (error) {
+        try {
+          console.error('[ACUDIENTE][TAREAS_AUTO][ERROR]', error);
+        } catch {}
+      }
+
+      navigate('/dashboard/acudiente', { replace: true });
     };
     run();
   }, [navigate]);

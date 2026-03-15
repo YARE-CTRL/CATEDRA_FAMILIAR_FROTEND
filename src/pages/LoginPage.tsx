@@ -111,7 +111,9 @@ export default function LoginPage() {
       } catch {}
       // En bypass, enviar un token dummy para satisfacer backends que lo requieren
       const captchaToSend = bypassValidations ? (captchaToken || 'dev-bypass-token') : captchaToken;
-      const result = await loginUnicoMultiRol(formData.correo, formData.password, captchaToSend);
+      const correoTrim = (formData.correo || '').trim();
+      const passwordTrim = (formData.password || '').trim();
+      const result = await loginUnicoMultiRol(correoTrim, passwordTrim, captchaToSend);
 
       if (result.success && result.user) {
         try {

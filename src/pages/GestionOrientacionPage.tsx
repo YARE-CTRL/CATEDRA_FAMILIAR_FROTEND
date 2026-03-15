@@ -54,6 +54,7 @@ const GestionOrientacionPage = () => {
     correo: '',
     contrasena: '',
     telefono: '',
+    address: '',
     institucionId: user?.institucionId || 0
   });
   
@@ -89,6 +90,7 @@ const GestionOrientacionPage = () => {
       correo: '',
       contrasena: '',
       telefono: '',
+      address: '',
       institucionId: user?.institucionId || 0
     });
   };
@@ -101,6 +103,7 @@ const GestionOrientacionPage = () => {
       correo: orientador.email || orientador.correo || '',
       contrasena: '',
       telefono: orientador.phone || orientador.telefono || '',
+      address: orientador.address || orientador.direccion || '',
       institucionId: orientador.institucionId || user?.institucionId || 0
     });
     setModalOrientador(true);
@@ -110,14 +113,24 @@ const GestionOrientacionPage = () => {
     setSaving(true);
     setError(null);
     try {
+      const errs: string[] = [];
+      if (!formOrientador.nombre.trim()) errs.push('Nombres requeridos');
+      if (!formOrientador.apellido.trim()) errs.push('Apellidos requeridos');
+      if (!formOrientador.correo.trim()) errs.push('Correo requerido');
+      if (!formOrientador.telefono.trim()) errs.push('Teléfono requerido');
+      if (!formOrientador.address.trim()) errs.push('Dirección requerida');
+      if (errs.length > 0) {
+        setError(errs.join('. '));
+        return;
+      }
       // Mapear campos al formato del backend
       const orientadorData = {
         firstName: formOrientador.nombre,
         lastName: formOrientador.apellido,
         email: formOrientador.correo,
-        password: formOrientador.contrasena,
         phone: formOrientador.telefono,
-        institucionId: formOrientador.institucionId
+        address: formOrientador.address,
+        ...(formOrientador.contrasena?.trim() ? { contrasena: formOrientador.contrasena.trim() } : {})
       };
 
       let res;
@@ -127,18 +140,24 @@ const GestionOrientacionPage = () => {
         res = await crearOrientador(orientadorData);
       }
 
-      if (res.success) {
-        setSuccess(editingOrientador ? 'Orientador actualizado exitosamente' : 'Orientador creado exitosamente');
+      if ((res as any).success) {
+        const data = (res as any).data;
+        const backendMsg = (res as any).message;
+        setSuccess(backendMsg || (editingOrientador ? 'Orientador actualizado exitosamente' : 'Orientador creado exitosamente'));
         setModalOrientador(false);
         setEditingOrientador(null);
         resetFormOrientador();
         await loadData();
         setTimeout(() => setSuccess(null), 3000);
+        if (data && data.passwordTemporal) {
+          alert(`✅ Orientador creado. Contraseña temporal: ${data.passwordTemporal}`);
+        }
       } else {
-        setError(res.message || 'Error al guardar orientador');
+        setError((res as any).message || (res as any).error || 'Error al guardar orientador');
       }
-    } catch (error) {
-      setError('Error al guardar orientador');
+    } catch (error: any) {
+      const msg = error?.message || 'Error al guardar orientador';
+      setError(msg);
     } finally {
       setSaving(false);
     }
@@ -425,6 +444,14 @@ const GestionOrientacionPage = () => {
             required
           />
           
+          <FormFieldInput
+            name="address"
+            label="Dirección"
+            value={formOrientador.address}
+            onChange={(e) => setFormOrientador({ ...formOrientador, address: e.target.value })}
+            required
+          />
+          
           {!editingOrientador && (
             <FormFieldInput
               name="contrasena"
@@ -432,7 +459,7 @@ const GestionOrientacionPage = () => {
               type="password"
               value={formOrientador.contrasena}
               onChange={(e) => setFormOrientador({ ...formOrientador, contrasena: e.target.value })}
-              required
+              
             />
           )}
           

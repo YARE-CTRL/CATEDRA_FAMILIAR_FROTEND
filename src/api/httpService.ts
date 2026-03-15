@@ -40,9 +40,31 @@ class HttpService {
   private getAuthToken(): string | null {
     try {
       const session = localStorage.getItem('session');
+      const directToken = localStorage.getItem('auth_token');
+      if (typeof directToken === 'string' && directToken.trim()) {
+        return directToken.replace(/^Bearer\s+/i, '').trim();
+      }
       if (session) {
         const parsedSession = JSON.parse(session);
-        return parsedSession.token || null;
+        const rawToken =
+          parsedSession?.token ||
+          parsedSession?.accessToken ||
+          parsedSession?.access_token ||
+          parsedSession?.jwt ||
+          parsedSession?.authToken ||
+          parsedSession?.data?.token ||
+          parsedSession?.data?.accessToken ||
+          parsedSession?.data?.access_token ||
+          parsedSession?.user?.token ||
+          parsedSession?.user?.accessToken ||
+          parsedSession?.user?.access_token ||
+          null;
+
+        if (typeof rawToken === 'string' && rawToken.trim()) {
+          return rawToken.replace(/^Bearer\s+/i, '').trim();
+        }
+
+        return null;
       }
     } catch (e) {
       console.warn('Error parsing session:', e);
@@ -59,7 +81,19 @@ class HttpService {
     const token = this.getAuthToken();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
+      console.log('[DEBUG][HTTP] Token JWT encontrado y agregado a headers:', {
+        token: token.substring(0, 20) + '...',
+        tokenLength: token.length,
+        fullHeader: `Bearer ${token.substring(0, 20)}...`
+      });
+    } else {
+      console.log('[DEBUG][HTTP] No se encontró token JWT en la sesión');
     }
+
+    console.log('[DEBUG][HTTP] Headers finales:', {
+      ...headers,
+      Authorization: headers.Authorization ? `${headers.Authorization.toString().substring(0, 27)}...` : '[No Authorization]'
+    });
 
     return headers;
   }
@@ -72,11 +106,23 @@ class HttpService {
     } else {
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
-        data = await response.json();
+        const jsonText = await response.text();
+        console.log('[DEBUG][HTTP] Response body (raw):', jsonText);
+        data = JSON.parse(jsonText) as T;
+        console.log('[DEBUG][HTTP] Response body (parsed):', data);
       } else {
         data = await response.text() as unknown as T;
+        console.log('[DEBUG][HTTP] Response body (text):', data);
       }
     }
+
+    console.log('[DEBUG][HTTP] Response completa:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      data: data,
+      contentType: response.headers.get('content-type')
+    });
 
     if (!response.ok) {
       const error: ApiError = {
@@ -96,7 +142,8 @@ class HttpService {
       data,
       status: response.status,
       statusText: response.statusText,
-      headers: response.headers
+      headers: response.headers,
+      url: response.url
     };
   }
 
@@ -177,6 +224,15 @@ if (params) {
     const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     const url = `${base}${path}`;
     const controller = new AbortController();
+    
+    console.log('[DEBUG][HTTP] Petición:', {
+      method,
+      url,
+      baseURL: this.config.baseURL,
+      endpoint,
+      path,
+      data: data ? JSON.stringify(data, null, 2) : 'no data'
+    });
     const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
 
     const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
@@ -198,8 +254,22 @@ if (params) {
 
     try {
       console.log(`[DEBUG][API] ${method}:`, url.toString());
+      console.log(`[DEBUG][API] Headers:`, headers);
+      console.log(`[DEBUG][API] Body:`, data ? (isFormData ? '[FormData]' : JSON.stringify(data, null, 2)) : '[No body]');
+      console.log(`[DEBUG][API] Options:`, {
+        method,
+        headers: Object.keys(headers),
+        hasBody: !!data,
+        isFormData,
+        bodySize: data ? (isFormData ? 'FormData' : JSON.stringify(data).length) : 0
+      });
+      
       const response = await fetch(url, options);
       console.log(`[DEBUG][API] ${method} Response:`, response.status, response.statusText);
+      
+      // Log response headers
+      console.log(`[DEBUG][API] Response Headers:`, Object.fromEntries(response.headers.entries()));
+      
       return await this.handleResponse<T>(response);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {

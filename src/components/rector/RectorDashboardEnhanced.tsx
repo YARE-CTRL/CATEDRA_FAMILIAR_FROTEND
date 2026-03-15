@@ -52,10 +52,10 @@ interface InstitutionInfo {
 
 export default function RectorDashboardEnhanced() {
   const session = getSession();
-  const user = session?.user;
+  let user = session?.user;
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | {message: string; type: string; user: any} | null>(null);
   const [stats, setStats] = useState<QuickStats>({
     totalCoordinadores: 0,
     coordinadoresActivos: 0,
@@ -85,13 +85,80 @@ export default function RectorDashboardEnhanced() {
         throw new Error('Sesión no válida o expirada');
       }
 
+      console.log('[DEBUG][RectorDashboard] Datos completos del usuario:', user);
+      console.log('[DEBUG][RectorDashboard] Campos de institución:', {
+        institucionId: user.institucionId,
+        institucion_id: user.institucion_id,
+        institucion: user.institucion,
+        'institucion.id': user.institucion?.id,
+        'institucion_id': user.institucion_id,
+        todosLosCampos: Object.keys(user)
+      });
+
       // Cargar la institución del rector primero
       let institucionRector: InstitutionInfo | null = null;
+      let institucionId = user?.institucionId || 
+                         user?.institucion_id || 
+                         user?.institucion?.id ||
+                         user?.institucionId ||
+                         user?.id_institucion;
       
-      if (user?.institucionId) {
+      console.log('[DEBUG][RectorDashboard] institucionId encontrado en sesión:', institucionId);
+      
+      // Si no hay institucionId en la sesión, intentar obtener datos actualizados del usuario
+      if (!institucionId) {
+        console.log('[DEBUG][RectorDashboard] No hay institucionId en sesión, obteniendo datos actualizados...');
+        try {
+          // Usar el endpoint específico para obtener datos actualizados
+          const userResponse = await fetch('http://localhost:3333/debug/usuario-datos-actualizados', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              correo: user.correo
+            })
+          });
+          
+          const userData = await userResponse.json();
+          console.log('[DEBUG][RectorDashboard] Datos actualizados del usuario:', userData);
+          
+          if (userData.success && userData.data) {
+            const updatedUser = userData.data;
+            
+            // Actualizar la sesión con los datos nuevos
+            const updatedSession = {
+              ...session,
+              user: updatedUser
+            };
+            localStorage.setItem('session', JSON.stringify(updatedSession));
+            
+            // Actualizar el user local
+            user = updatedUser;
+            
+            // Buscar institucionId en los datos actualizados (tiene múltiples campos)
+            institucionId = updatedUser?.institucionId || 
+                           updatedUser?.institucion_id || 
+                           updatedUser?.institucion?.id ||
+                           updatedUser?.institucionId ||
+                           updatedUser?.id_institucion ||
+                           updatedUser?.['institucion.id'];
+            
+            console.log('[DEBUG][RectorDashboard] institucionId encontrado en datos actualizados:', institucionId);
+          }
+        } catch (error) {
+          console.warn('[DEBUG][RectorDashboard] Error obteniendo datos actualizados:', error);
+        }
+      }
+      
+      if (institucionId) {
+        // El rector tiene institución asignada, cargarla
         try {
           // Usar el endpoint correcto para rector
+          console.log('[DEBUG][RectorDashboard] Intentando getMiInstitucionRector...');
           const instRes = await apiClient.getMiInstitucionRector();
+          console.log('[DEBUG][RectorDashboard] Respuesta getMiInstitucionRector:', instRes);
+          
           if (instRes.success && instRes.data) {
             institucionRector = {
               nombre: instRes.data.nombre || 'Institución',
@@ -99,12 +166,13 @@ export default function RectorDashboardEnhanced() {
               departamento: instRes.data.departamento?.nombre || instRes.data.departamento,
               codigoDane: instRes.data.codigoDane
             };
-          }
-        } catch (instError) {
-          console.warn('Error cargando institución con getMiInstitucionRector:', instError);
-          // Intentar con el endpoint alternativo
-          try {
-            const instRes = await apiClient.getInstitucionById(user.institucionId);
+            console.log('[DEBUG][RectorDashboard] Institución cargada con getMiInstitucionRector:', institucionRector);
+          } else {
+            console.warn('[DEBUG][RectorDashboard] getMiInstitucionRector falló, intentando fallback...');
+            // Intentar con el endpoint alternativo
+            const instRes = await apiClient.getInstitucionById(institucionId);
+            console.log('[DEBUG][RectorDashboard] Respuesta getInstitucionById:', instRes);
+            
             if (instRes.success && instRes.data) {
               institucionRector = {
                 nombre: instRes.data.nombre || 'Institución',
@@ -112,10 +180,38 @@ export default function RectorDashboardEnhanced() {
                 departamento: instRes.data.departamento?.nombre || instRes.data.departamento,
                 codigoDane: instRes.data.codigoDane
               };
+              console.log('[DEBUG][RectorDashboard] Institución cargada con getInstitucionById:', institucionRector);
             }
-          } catch (fallbackError) {
-            console.warn('Error cargando institución con getInstitucionById:', fallbackError);
           }
+        } catch (instError) {
+          console.warn('[DEBUG][RectorDashboard] Error cargando institución, intentando fallback:', instError);
+          // Intentar con el endpoint alternativo
+            try {
+              const instRes = await apiClient.getInstitucionById(institucionId);
+              console.log('[DEBUG][RectorDashboard] Respuesta getInstitucionById (fallback):', instRes);
+              console.log('[DEBUG][RectorDashboard] Estructura de la respuesta:', {
+                success: instRes.success,
+                data: instRes.data,
+                status: instRes.status,
+                'typeof success': typeof instRes.success,
+                'typeof data': typeof instRes.data,
+                'data keys': instRes.data ? Object.keys(instRes.data) : 'null'
+              });
+              
+              if (instRes.data) {
+                institucionRector = {
+                  nombre: instRes.data.nombre || 'Institución',
+                  municipio: instRes.data.municipio?.nombre || instRes.data.municipio,
+                  departamento: instRes.data.departamento?.nombre || instRes.data.departamento,
+                  codigoDane: instRes.data.codigoDane
+                };
+                console.log('[DEBUG][RectorDashboard] Institución cargada con fallback:', institucionRector);
+              } else {
+                console.warn('[DEBUG][RectorDashboard] El fallback no cumplió las condiciones success && data');
+              }
+            } catch (fallbackError) {
+              console.warn('[DEBUG][RectorDashboard] Error en fallback:', fallbackError);
+            }
         }
         
         // Validar que la institución se cargó correctamente
@@ -125,7 +221,8 @@ export default function RectorDashboardEnhanced() {
         
         setMiInstitucion(institucionRector);
       } else {
-        throw new Error('El rector debe estar asignado a una institución');
+        // El rector no tiene institución asignada - mostrar mensaje amigable
+        throw new Error('El rector no está asignado a ninguna institución. Por favor, contacte al administrador del sistema para asignarle una institución.');
       }
 
       // Usar endpoints específicos del rector
@@ -263,7 +360,18 @@ export default function RectorDashboardEnhanced() {
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
-      setError(error instanceof Error ? error.message : 'Error al cargar datos del dashboard');
+      const errorMessage = error instanceof Error ? error.message : 'Error al cargar datos del dashboard';
+      
+      // Si el error es específicamente sobre no tener institución asignada, mostrar un mensaje más amigable
+      if (errorMessage.includes('no está asignado a ninguna institución')) {
+        setError({
+          message: errorMessage,
+          type: 'no_institution',
+          user: user
+        });
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -299,9 +407,63 @@ export default function RectorDashboardEnhanced() {
   }
 
   if (error) {
+    // Si es un error específico de rector sin institución, mostrar mensaje personalizado
+    if (typeof error === 'object' && error.type === 'no_institution') {
+      return (
+        <DashboardLayout>
+          <div className="max-w-2xl mx-auto mt-20">
+            <div className="bg-white rounded-2xl shadow-xl border border-amber-200 p-8">
+              <div className="text-center">
+                <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <IconAlertTriangle className="w-10 h-10 text-amber-600" />
+                </div>
+                
+                <h1 className="text-2xl font-bold text-gray-900 mb-4">
+                  Rector sin Institución Asignada
+                </h1>
+                
+                <p className="text-gray-600 mb-6 leading-relaxed">
+                  Hola, <span className="font-semibold">{error.user?.nombre || 'Rector'}</span>.<br />
+                  Actualmente no tienes ninguna institución asignada en el sistema.
+                </p>
+                
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+                  <p className="text-amber-800 text-sm">
+                    <strong>Para solucionar esto:</strong><br />
+                    Contacta al administrador del sistema para que te asigne a una institución.
+                    Una vez tengas una institución asignada, podrás acceder a todas las funciones de tu panel de rectoría.
+                  </p>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                  >
+                    Reintentar
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Cerrar sesión
+                      localStorage.removeItem('session');
+                      window.location.href = '/login';
+                    }}
+                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                  >
+                    Cerrar Sesión
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </DashboardLayout>
+      );
+    }
+    
+    // Para otros errores, mostrar el componente ErrorState normal
     return (
       <DashboardLayout>
-        <ErrorState message={error} onRetry={retryLoad} />
+        <ErrorState message={typeof error === 'string' ? error : error.message} onRetry={retryLoad} />
       </DashboardLayout>
     );
   }

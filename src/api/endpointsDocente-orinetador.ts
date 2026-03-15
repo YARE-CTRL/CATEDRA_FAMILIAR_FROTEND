@@ -42,6 +42,19 @@ function normalizeRol(input?: unknown): RolUsuario | undefined {
   return undefined;
 }
 
+const parseJwtPayload = (token: string): Record<string, any> | null => {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
+    const decoded = typeof window !== 'undefined' ? window.atob(padded) : atob(padded);
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+};
+
 // Public: GET /grados -> { success, data: [ { id, nombre, orden, cursos: [...] } ] }
 export async function getGradosPublic(): Promise<{ success: boolean; data: any[]; message?: string; status?: number }> {
   try {
@@ -72,218 +85,238 @@ export async function loginUnicoMultiRol(correo: string, contrasena: string, cap
         captchaLen: captchaToken ? String(captchaToken).length : 0
       });
     } catch {}
+
+    const correoTrim = (correo || '').trim();
+    const passTrim = (contrasena || '').trim();
+    const normalizedDocumento = typeof correoTrim === 'string' ? correoTrim.replace(/\D/g, '') : '';
+    const isEmail = typeof correoTrim === 'string' && correoTrim.includes('@');
     // Detectar si el input es un número de documento (acudiente)
-    const isDocumento = typeof correo === 'string' && /^[0-9]{5,}$/.test(correo.trim());
-    const payload = isDocumento
-      // Acudiente: enviar usuario (doc), numeroDocumento y contrasena + captcha
-      ? {
-          usuario: correo.trim(),
-          numeroDocumento: correo.trim(),
-          contrasena,
-          password: contrasena,
-          recaptcha: captchaToken,
-          reCaptcha: captchaToken,
-          recaptchaToken: captchaToken,
-          token_captcha: captchaToken,
-          captchaToken: captchaToken
+    const isDocumento = !isEmail && normalizedDocumento.length >= 5;
+
+    // Generar variantes de payload para máxima compatibilidad
+    const commonCaptcha = {
+      recaptcha: captchaToken,
+      reCaptcha: captchaToken,
+      recaptchaToken: captchaToken,
+      token_captcha: captchaToken,
+      captchaToken: captchaToken
+    };
+
+    const variants: Array<{ path: string; body: any; label: string }> = [];
+
+    if (isDocumento) {
+      // Acudiente por documento
+      variants.push(
+        // Específico de acudientes con contrato confirmado
+        { path: '/acudientes/login', body: { numeroDocumento: normalizedDocumento, contrasena: passTrim }, label: 'acudiente:numeroDocumento+contrasena' },
+        // Específico de acudientes
+        { path: '/acudientes/login', body: { usuario: normalizedDocumento, numeroDocumento: normalizedDocumento, contrasena: passTrim, ...commonCaptcha }, label: 'acudiente:usuario+numeroDocumento+contrasena' },
+        { path: '/acudientes/login', body: { usuario: normalizedDocumento, numeroDocumento: normalizedDocumento, password: passTrim, ...commonCaptcha }, label: 'acudiente:usuario+numeroDocumento+password' }
+      );
+    } else {
+      // General por correo/email - SOLO formatos soportados confirmados
+      variants.push(
+        // Específico de acudientes con contrato confirmado
+        { path: '/acudientes/login', body: { correo: correoTrim, contrasena: passTrim }, label: 'acudiente:correo+contrasena' },
+        // Prioridad: /auth/login con correo+contrasena (confirmado por backend)
+        { path: '/auth/login', body: { correo: correoTrim, contrasena: passTrim, ...commonCaptcha }, label: 'auth/login:correo+contrasena' },
+        // Compatibilidad adicional: /auth/login con correo+password
+        { path: '/auth/login', body: { correo: correoTrim, password: passTrim, ...commonCaptcha }, label: 'auth/login:correo+password' }
+      );
+    }
+
+    let lastError: any = null;
+    for (const attempt of variants) {
+      try {
+        console.log('[LOGIN][DEBUG] Intento', attempt.label, '→', attempt.path, 'payloadKeys:', Object.keys(attempt.body), {
+          tieneCorreo: Boolean(attempt.body?.correo || attempt.body?.email || attempt.body?.usuario),
+          tieneContrasena: Boolean(attempt.body?.contrasena || attempt.body?.password),
+          lenContrasena: String(attempt.body?.contrasena || attempt.body?.password || '').length
+        });
+        const response = await httpService.post<any>(attempt.path, attempt.body);
+        const raw = response.data as any;
+
+        try {
+          console.log('[LOGIN][DEBUG] Respuesta cruda', attempt.label, {
+            status: response.status,
+            keys: Object.keys(raw || {})
+          });
+        } catch {}
+
+        // Extraer token de múltiples ubicaciones
+        let token: string | undefined =
+          raw?.token ??
+          raw?.data?.token ??
+          raw?.jwt ??
+          raw?.access_token ??
+          raw?.accessToken ??
+          raw?.bearerToken ??
+          raw?.bearer ??
+          raw?.data?.bearerToken ??
+          raw?.token_acceso ??
+          raw?.tokenAcceso ??
+          raw?.data?.token_acceso ??
+          raw?.tokenBearer ??
+          raw?.api_token ??
+          raw?.sessionToken ??
+          raw?.data?.accessToken;
+
+        try {
+          if (!token && response.headers && typeof response.headers.get === 'function') {
+            const authHeader = response.headers.get('Authorization') || response.headers.get('authorization');
+            if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+              token = authHeader.slice(7).trim();
+            }
+          }
+        } catch {}
+
+        const message: string | undefined = raw?.message ?? raw?.mensaje ?? raw?.data?.message;
+        if (!token) {
+          // Si no hay token, continuar con siguiente variante
+          try { console.warn('[LOGIN][DEBUG] Sin token en intento', attempt.label, '->', message); } catch {}
+          lastError = { message: message || 'Sin token' };
+          continue;
         }
-      // Payload general para otros roles/backends
-      : {
-          correo,
-          email: correo,
-          usuario: correo,
-          contrasena,
-          password: contrasena,
-          // Enviar token de reCAPTCHA usando claves comunes para maximizar compatibilidad
-          recaptcha: captchaToken,
-          reCaptcha: captchaToken,
-          recaptchaToken: captchaToken,
-          token_captcha: captchaToken,
-          captchaToken: captchaToken
+
+        const usuarioRaw: any = raw?.usuario ?? raw?.user ?? raw?.data?.usuario ?? raw?.data?.user;
+        const funcionarioRaw: any = raw?.funcionario ?? raw?.data?.funcionario;
+        const docenteRaw: any = raw?.docente ?? raw?.data?.docente;
+        const acudienteRaw: any = raw?.acudiente ?? raw?.data?.acudiente;
+
+        const rolIdRaw: unknown =
+          raw?.rolId ??
+          raw?.rol_id ??
+          usuarioRaw?.rolId ??
+          usuarioRaw?.rol_id ??
+          funcionarioRaw?.rolId ??
+          funcionarioRaw?.rol_id ??
+          docenteRaw?.rolId ??
+          docenteRaw?.rol_id;
+
+        const rolId: number | undefined =
+          typeof rolIdRaw === 'number'
+            ? rolIdRaw
+            : typeof rolIdRaw === 'string' && rolIdRaw.trim() !== '' && !Number.isNaN(Number(rolIdRaw))
+              ? Number(rolIdRaw)
+              : undefined;
+
+        const rolNombre: RolUsuario | undefined =
+          (attempt.path === '/acudientes/login' ? 'acudiente' : undefined) ??
+          normalizeRol(
+            usuarioRaw?.rolNombre ??
+              usuarioRaw?.rol_nombre ??
+              usuarioRaw?.rol ??
+              raw?.rolNombre ??
+              raw?.rol_nombre ??
+              raw?.rol ??
+              funcionarioRaw?.rolNombre ??
+              funcionarioRaw?.rol_nombre ??
+              funcionarioRaw?.rol
+          ) ??
+          (acudienteRaw ? 'acudiente' : undefined) ??
+          (docenteRaw ? 'docente_aula' : undefined) ??
+          extractRolFromMessage(message) ??
+          (typeof rolId === 'number' ? ROLES_MAP[rolId] : undefined);
+
+        const jwtPayload = parseJwtPayload(token);
+
+        const institucionId =
+          usuarioRaw?.institucionId ??
+          usuarioRaw?.institucion_id ??
+          usuarioRaw?.institucion?.id ??
+          usuarioRaw?.docente?.institucionId ??
+          usuarioRaw?.docente?.institucion_id ??
+          usuarioRaw?.docente?.institucion?.id ??
+          raw?.institucionId ??
+          raw?.institucion_id ??
+          raw?.data?.institucionId ??
+          raw?.data?.institucion_id ??
+          raw?.institucion?.id ??
+          raw?.data?.institucion?.id ??
+          raw?.data?.usuario?.institucionId ??
+          raw?.data?.usuario?.institucion_id ??
+          raw?.data?.usuario?.institucion?.id ??
+          raw?.data?.usuario?.docente?.institucionId ??
+          raw?.data?.usuario?.docente?.institucion_id ??
+          raw?.data?.usuario?.docente?.institucion?.id ??
+          funcionarioRaw?.institucionId ??
+          funcionarioRaw?.institucion_id ??
+          funcionarioRaw?.institucion?.id ??
+          docenteRaw?.institucionId ??
+          docenteRaw?.institucion_id ??
+          docenteRaw?.institucion?.id ??
+          jwtPayload?.institucionId ??
+          jwtPayload?.institucion_id ??
+          jwtPayload?.user?.institucionId ??
+          jwtPayload?.user?.institucion_id ??
+          jwtPayload?.usuario?.institucionId ??
+          jwtPayload?.usuario?.institucion_id;
+
+        const institucion =
+          funcionarioRaw?.institucion ??
+          docenteRaw?.institucion ??
+          raw?.institucion ??
+          raw?.data?.institucion ??
+          usuarioRaw?.institucion;
+
+        if (!rolNombre) {
+          try { console.warn('[LOGIN][DEBUG] Token sin rol en intento', attempt.label); } catch {}
+          lastError = { message: 'Token recibido sin rol' };
+          continue;
+        }
+
+        const user: Usuario = {
+          id: Number(usuarioRaw?.id ?? raw?.id ?? 0),
+          nombre: usuarioRaw?.nombre || raw?.nombre || 'Usuario',
+          apellidos: usuarioRaw?.apellido || usuarioRaw?.apellidos || raw?.apellido || raw?.apellidos || '',
+          correo: usuarioRaw?.correo || usuarioRaw?.email || raw?.correo || raw?.email || correoTrim,
+          telefono: usuarioRaw?.telefono || raw?.telefono || '',
+          rol: rolNombre,
+          activo: Boolean(usuarioRaw?.estaActivo ?? usuarioRaw?.activo ?? raw?.estaActivo ?? raw?.activo ?? true),
+          debe_cambiar_contrasena: Boolean(usuarioRaw?.debeCambiarContrasena ?? usuarioRaw?.debe_cambiar_contrasena ?? raw?.debeCambiarContrasena ?? raw?.debe_cambiar_contrasena ?? false),
+          institucionId: institucionId
         };
 
-    try {
-      console.log('[LOGIN][DEBUG] Payload seleccionado', {
-        esAcudientePorDocumento: isDocumento,
-        keys: Object.keys(payload)
-      });
-    } catch {}
+        const context = {
+          cursos: docenteRaw?.cursos ?? raw?.cursos ?? raw?.data?.cursos ?? usuarioRaw?.cursos,
+          estudiantes: acudienteRaw?.estudiantes ?? raw?.estudiantes ?? raw?.data?.estudiantes ?? usuarioRaw?.estudiantes,
+          institucion: institucion,
+          institucionId: institucionId
+        };
 
-    const endpointPath = isDocumento ? '/acudientes/login' : '/login';
-    const response = await httpService.post<any>(endpointPath, payload);
-
-    const raw = response.data as any;
-
-    try {
-      console.log('[LOGIN][DEBUG] Respuesta cruda de /login', {
-        status: response.status,
-        tieneToken: Boolean((raw?.token ?? raw?.data?.token ?? raw?.jwt ?? raw?.access_token)),
-        keys: Object.keys(raw || {})
-      });
-    } catch {}
-
-    // Intentar extraer el token desde múltiples ubicaciones comunes y, si no está, desde el header Authorization
-    let token: string | undefined =
-      raw?.token ??
-      raw?.data?.token ??
-      raw?.jwt ??
-      raw?.access_token ??
-      raw?.accessToken ??
-      raw?.bearerToken ??
-      raw?.bearer ??
-      raw?.data?.bearerToken ??
-      raw?.token_acceso ??
-      raw?.tokenAcceso ??
-      raw?.data?.token_acceso ??
-      raw?.tokenBearer ??
-      raw?.api_token ??
-      raw?.sessionToken ??
-      raw?.data?.accessToken;
-
-    try {
-      if (!token && response.headers && typeof response.headers.get === 'function') {
-        const authHeader = response.headers.get('Authorization') || response.headers.get('authorization');
-        if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
-          token = authHeader.slice(7).trim();
-        }
+        localStorage.removeItem('previewRole');
+        localStorage.setItem('session', JSON.stringify({
+          token,
+          user,
+          context,
+          isPreview: false
+        }));
+        localStorage.setItem('auth_token', token);
+        localStorage.setItem('user_context', JSON.stringify(context));
+        try {
+          httpService.setAuthToken(token);
+        } catch {}
+        try { console.log('[LOGIN][DEBUG] JWT obtenido en intento', attempt.label); } catch {}
+        return { success: true, user, token, message, context };
+      } catch (err: any) {
+        lastError = err;
+        try {
+          console.warn('[LOGIN][DEBUG] Falló intento', attempt.label, {
+            status: err?.status,
+            message: err?.message
+          });
+        } catch {}
       }
-    } catch {}
-
-    const message: string | undefined = raw?.message ?? raw?.mensaje ?? raw?.data?.message;
-
-    const usuarioRaw: any = raw?.usuario ?? raw?.user ?? raw?.data?.usuario ?? raw?.data?.user;
-    const funcionarioRaw: any = raw?.funcionario ?? raw?.data?.funcionario;
-    const docenteRaw: any = raw?.docente ?? raw?.data?.docente;
-    const acudienteRaw: any = raw?.acudiente ?? raw?.data?.acudiente;
-
-    const rolIdRaw: unknown =
-      raw?.rolId ??
-      raw?.rol_id ??
-      usuarioRaw?.rolId ??
-      usuarioRaw?.rol_id ??
-      funcionarioRaw?.rolId ??
-      funcionarioRaw?.rol_id ??
-      docenteRaw?.rolId ??
-      docenteRaw?.rol_id;
-
-    const rolId: number | undefined =
-      typeof rolIdRaw === 'number'
-        ? rolIdRaw
-        : typeof rolIdRaw === 'string' && rolIdRaw.trim() !== '' && !Number.isNaN(Number(rolIdRaw))
-          ? Number(rolIdRaw)
-          : undefined;
-
-    const rolNombre: RolUsuario | undefined =
-      // 1) PRIORIDAD: nombre de rol (es estable aunque cambien los IDs entre ambientes)
-      normalizeRol(
-        // estructura más común en tus respuestas
-        usuarioRaw?.rolNombre ??
-          usuarioRaw?.rol_nombre ??
-          usuarioRaw?.rol ??
-          // otros posibles
-          raw?.rolNombre ??
-          raw?.rol_nombre ??
-          raw?.rol ??
-          funcionarioRaw?.rolNombre ??
-          funcionarioRaw?.rol_nombre ??
-          funcionarioRaw?.rol
-      ) ??
-      // 2) mensaje ("Iniciaste con rol: ...")
-      extractRolFromMessage(message) ??
-      // 3) FALLBACK: rolId (solo si no viene nombre)
-      (typeof rolId === 'number' ? ROLES_MAP[rolId] : undefined);
-
-    if (!token) {
-      try { console.warn('[LOGIN][DEBUG] Falla: no se recibió token', { message }); } catch {}
-      return { success: false, error: message || 'Login inválido: no se recibió token.' };
     }
 
-    if (!rolNombre) {
-      try { console.warn('[LOGIN][DEBUG] Falla: no se pudo determinar rol', { rolId, message }); } catch {}
-      return { success: false, error: message || 'Login inválido: no se pudo determinar el rol.' };
-    }
-
-    const user: Usuario = {
-      id: Number(usuarioRaw?.id ?? raw?.id ?? 0),
-      nombre: usuarioRaw?.nombre || raw?.nombre || 'Usuario',
-      apellidos: usuarioRaw?.apellido || usuarioRaw?.apellidos || raw?.apellido || raw?.apellidos || '',
-      correo: usuarioRaw?.correo || usuarioRaw?.email || raw?.correo || raw?.email || correo,
-      telefono: usuarioRaw?.telefono || raw?.telefono || '',
-      rol: rolNombre,
-      activo: Boolean(usuarioRaw?.estaActivo ?? usuarioRaw?.activo ?? raw?.estaActivo ?? raw?.activo ?? true),
-      debe_cambiar_contrasena: Boolean(usuarioRaw?.debeCambiarContrasena ?? usuarioRaw?.debe_cambiar_contrasena ?? raw?.debeCambiarContrasena ?? raw?.debe_cambiar_contrasena ?? false),
-      institucionId: usuarioRaw?.institucionId ?? raw?.institucionId ?? funcionarioRaw?.institucionId ?? funcionarioRaw?.institucion?.id ?? docenteRaw?.institucionId
-    };
-
-    const context = {
-      cursos: docenteRaw?.cursos ?? raw?.cursos ?? raw?.data?.cursos ?? usuarioRaw?.cursos,
-      estudiantes: acudienteRaw?.estudiantes ?? raw?.estudiantes ?? raw?.data?.estudiantes ?? usuarioRaw?.estudiantes,
-      institucion: funcionarioRaw?.institucion ?? raw?.institucion ?? raw?.data?.institucion ?? usuarioRaw?.institucion,
-      institucionId: funcionarioRaw?.institucionId ?? funcionarioRaw?.institucion?.id ?? raw?.institucionId ?? raw?.data?.institucionId ?? usuarioRaw?.institucionId ?? docenteRaw?.institucionId
-    };
-
-    localStorage.removeItem('previewRole');
-    localStorage.setItem('session', JSON.stringify({
-      token,
-      user,
-      context,
-      isPreview: false
-    }));
-    // Configurar Authorization inmediatamente para siguientes requests
-    try {
-      httpService.setAuthToken(token);
-      try {
-        const len = token ? String(token).length : 0;
-        console.log('[LOGIN][DEBUG] Token aplicado a Authorization', { len });
-      } catch {}
-    } catch {}
-    // Imprimir el token en consola tras login exitoso (pedido del admin)
-    try {
-      console.log('[LOGIN][DEBUG] JWT:', token);
-    } catch {}
-
-    return { success: true, user, token, message, context };
+    // Si llegamos aquí, todos los intentos fallaron
+    const friendly = lastError?.message || 'Credenciales incorrectas o endpoint no compatible';
+    return { success: false, error: friendly };
   } catch (error: any) {
-    try {
-      const body = error?.body;
-      const serverMsg: string | undefined =
-        body?.message ?? body?.mensaje ?? body?.error ?? body?.detail ?? body?.detalle;
-      const reason: string | undefined = body?.reason ?? body?.motivo;
-      const code: string | number | undefined = error?.code ?? body?.code ?? body?.error_code;
-      // Campos que podrían indicar por qué "no existe"
-      const field: string | undefined = body?.field ?? body?.campo;
-      const fields = Array.isArray(body?.fields || body?.errores)
-        ? (body?.fields || body?.errores).map((e: any) => e?.field || e?.campo || e?.name).filter(Boolean)
-        : undefined;
-
-      const composed = [serverMsg, reason]
-        .filter(Boolean)
-        .join(' - ');
-
-      console.error('[LOGIN][DEBUG] Error en login', {
-        mensaje: error?.message,
-        status: error?.status,
-        code,
-        serverMsg,
-        reason,
-        field,
-        fields
-      });
-
-      const friendly = composed || error?.message || 'Error de conexión';
-      const withField = field ? `${friendly} (campo: ${field})` : friendly;
-      const withFields = !field && fields?.length ? `${friendly} (campos: ${fields.join(', ')})` : withField;
-
-      return {
-        success: false,
-        error: withFields
-      };
-    } catch {
-      return {
-        success: false,
-        error: error?.message || 'Error de conexión'
-      };
-    }
+    return {
+      success: false,
+      error: error?.message || 'Error de conexión'
+    };
   }
 }
 

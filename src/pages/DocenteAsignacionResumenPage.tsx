@@ -56,6 +56,22 @@ export default function DocenteAsignacionResumenPage(){
 
 
 
+  useEffect(() => {
+
+    if (!evidenceModal.open) {
+
+      setExpandTexto(false);
+
+      return;
+
+    }
+
+    setExpandTexto(false);
+
+  }, [evidenceModal.open, evidenceModal.entrega?.id]);
+
+
+
   const parseDate = (s?: string) => {
 
     if (!s) return null as Date | null;
@@ -804,53 +820,87 @@ export default function DocenteAsignacionResumenPage(){
 
                   {/* Header enriquecido */}
 
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 p-4">
 
-                    <div>
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
 
-                      <div className="text-xs font-semibold text-slate-500">Estudiante</div>
+                      <div>
 
-                      <div className="text-base font-medium text-slate-800 flex items-center gap-2 flex-wrap">
+                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Estudiante</div>
 
-                        <span>{evidenceModal.entrega.estudianteNombre || (evidenceModal.entrega.estudiante ? `${evidenceModal.entrega.estudiante.nombres} ${evidenceModal.entrega.estudiante.apellidos}` : `#${evidenceModal.entrega.estudianteId}`)}</span>
+                        <div className="mt-2 text-lg font-semibold text-slate-900 flex items-center gap-2 flex-wrap">
 
-                        {evidenceModal.entrega?.curso?.nombre && (
+                          <span>{evidenceModal.entrega.estudianteNombre || (evidenceModal.entrega.estudiante ? `${evidenceModal.entrega.estudiante.nombres} ${evidenceModal.entrega.estudiante.apellidos}` : `#${evidenceModal.entrega.estudianteId}`)}</span>
 
-                          <span className="px-2 py-0.5 rounded-lg border bg-sky-50 text-sky-700 border-sky-200 text-xs">{evidenceModal.entrega.curso.nombre}</span>
+                          {evidenceModal.entrega?.curso?.nombre && (
 
-                        )}
+                            <span className="px-3 py-1 rounded-full border bg-sky-50 text-sky-700 border-sky-200 text-xs font-semibold">{evidenceModal.entrega.curso.nombre}</span>
 
-                        {(evidenceModal.entrega?.esIndividual === true || evidenceModal.entrega?.especial === true || evidenceModal.entrega?.asignacion?.esIndividual === true) && (
+                          )}
 
-                          <span className="px-2 py-0.5 rounded-lg border bg-purple-50 text-purple-700 border-purple-200 text-xs">Especial</span>
+                          {(evidenceModal.entrega?.esIndividual === true || evidenceModal.entrega?.especial === true || evidenceModal.entrega?.asignacion?.esIndividual === true) && (
 
-                        )}
+                            <span className="px-3 py-1 rounded-full border bg-purple-50 text-purple-700 border-purple-200 text-xs font-semibold">Especial</span>
+
+                          )}
+
+                        </div>
 
                       </div>
 
-                    </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 text-sm">
 
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
 
-                      <span className="px-2 py-0.5 rounded-lg border bg-slate-50 text-slate-700 border-slate-200">{evidenceModal.entrega.fechaEntrega ? new Date(evidenceModal.entrega.fechaEntrega).toLocaleString() : '-'}</span>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Fecha</div>
 
-                      {evidenceModal.entrega.entregadoATiempo === true && (
+                          <div className="mt-1 text-sm font-semibold text-slate-800">{evidenceModal.entrega.fechaEntrega ? new Date(evidenceModal.entrega.fechaEntrega).toLocaleString() : '-'}</div>
 
-                        <span className="px-2 py-0.5 rounded-lg border bg-emerald-50 text-emerald-700 border-emerald-200">A tiempo</span>
+                        </div>
 
-                      )}
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
 
-                      {evidenceModal.entrega.entregadoATiempo === false && (
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Estado</div>
 
-                        <span className="px-2 py-0.5 rounded-lg border bg-rose-50 text-rose-700 border-rose-200">Tarde{typeof evidenceModal.entrega.diasTarde === 'number' ? ` (${evidenceModal.entrega.diasTarde} d)` : ''}</span>
+                          <div className="mt-2">
 
-                      )}
+                            {evidenceModal.entrega.entregadoATiempo === true && (
 
-                      {evidenceModal.entrega.calificacion && (
+                              <span className="inline-flex px-3 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 text-xs font-semibold">A tiempo</span>
 
-                        <span className="px-2 py-0.5 rounded-lg border bg-teal-50 text-teal-700 border-teal-200">Nota: {typeof evidenceModal.entrega.calificacion.nota === 'number' ? evidenceModal.entrega.calificacion.nota.toFixed(1) : evidenceModal.entrega.calificacion.nota} • {evidenceModal.entrega.calificacion.escala || '1-5'}</span>
+                            )}
 
-                      )}
+                            {evidenceModal.entrega.entregadoATiempo === false && (
+
+                              <span className="inline-flex px-3 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200 text-xs font-semibold">Tarde{typeof evidenceModal.entrega.diasTarde === 'number' ? ` (${evidenceModal.entrega.diasTarde} d)` : ''}</span>
+
+                            )}
+
+                            {evidenceModal.entrega.entregadoATiempo !== true && evidenceModal.entrega.entregadoATiempo !== false && (
+
+                              <span className="inline-flex px-3 py-1 rounded-full border bg-slate-50 text-slate-700 border-slate-200 text-xs font-semibold">Sin estado</span>
+
+                            )}
+
+                          </div>
+
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:col-span-2 xl:col-span-1">
+
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Nota</div>
+
+                          <div className="mt-1 flex items-end gap-2">
+
+                            <span className="text-2xl font-bold text-teal-700">{evidenceModal.entrega.calificacion ? (typeof evidenceModal.entrega.calificacion.nota === 'number' ? evidenceModal.entrega.calificacion.nota.toFixed(1) : evidenceModal.entrega.calificacion.nota) : '--'}</span>
+
+                            <span className="pb-1 text-xs font-medium text-slate-500">{evidenceModal.entrega.calificacion?.escala || '1-5'}</span>
+
+                          </div>
+
+                        </div>
+
+                      </div>
 
                     </div>
 
@@ -885,28 +935,6 @@ export default function DocenteAsignacionResumenPage(){
                         </div>
 
                       </div>
-
-
-
-                      {evidenceModal.entrega.evidenciaTexto && (
-
-                        <div>
-
-                          <div className="text-xs font-semibold text-slate-500 mb-1">Texto enviado</div>
-
-                          <div className={`bg-slate-50 rounded-xl p-3 border border-slate-200 text-sm text-slate-800 whitespace-pre-wrap ${expandTexto ? '' : 'max-h-40 overflow-hidden relative pr-6'}`}>
-
-                            {evidenceModal.entrega.evidenciaTexto}
-
-                            {!expandTexto && (<div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none" />)}
-
-                          </div>
-
-                          <button className="mt-1 text-xs text-teal-700 underline" onClick={()=> setExpandTexto(!expandTexto)}>{expandTexto ? 'Ver menos' : 'Ver más'}</button>
-
-                        </div>
-
-                      )}
 
                     </div>
 
@@ -979,6 +1007,42 @@ export default function DocenteAsignacionResumenPage(){
                       )}
 
                     </div>
+
+
+
+                    {evidenceModal.entrega.evidenciaTexto && (
+
+                      <div className="md:col-span-5 space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+
+                        <div className="flex items-center justify-between gap-3">
+
+                          <div className="text-xs font-semibold text-slate-500">Texto enviado</div>
+
+                          <div className="text-xs text-slate-400">{String(evidenceModal.entrega.evidenciaTexto).trim().length} caracteres</div>
+
+                        </div>
+
+                        <div className={`relative rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition-all ${expandTexto ? 'max-h-none' : 'max-h-56 overflow-hidden'}`}>
+
+                          <div className="relative z-10 min-h-[3rem] whitespace-pre-wrap break-words text-[16px] font-medium leading-7 text-slate-900 [text-shadow:0_0_0_transparent]">
+
+                            {evidenceModal.entrega.evidenciaTexto}
+
+                          </div>
+
+                          {!expandTexto && (<div className="absolute bottom-0 left-0 right-0 z-20 h-12 bg-gradient-to-t from-white via-white/90 to-transparent pointer-events-none" />)}
+
+                        </div>
+
+                        <div className="flex justify-end">
+
+                          <button className="inline-flex items-center rounded-full border border-teal-200 bg-white px-4 py-2 text-sm font-semibold text-teal-700 shadow-sm transition hover:bg-teal-50" onClick={()=> setExpandTexto(prev => !prev)}>{expandTexto ? 'Ver menos' : 'Ver más'}</button>
+
+                        </div>
+
+                      </div>
+
+                    )}
 
                   </div>
 

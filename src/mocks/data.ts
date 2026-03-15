@@ -95,6 +95,10 @@ export interface Tarea {
   fechaCreacion?: string; // Alias para fechaInicio
   fechaLimite?: string; // Alias para fechaVencimiento
   cursoId: number;
+  // Nuevos campos relacionados con institución/autoría
+  institucionId?: number;
+  institucion?: { id: number; nombre: string };
+  creador?: { id: number; correo: string };
   docenteId: number;
   periodoId?: number;
   incluyeEnBoletin: boolean;

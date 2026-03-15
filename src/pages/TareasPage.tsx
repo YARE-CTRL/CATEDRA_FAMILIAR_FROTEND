@@ -50,6 +50,9 @@ interface BancoTarea {
   archivoUrl?: string | null;
   archivo_url?: string | null;
   archivo?: string | null;
+  // Institución (para separar "Mi institución" vs "Otras")
+  institucionId?: number;
+  institucion?: { id: number; nombre: string } | null;
 }
 
 export default function TareasPage() {
@@ -650,7 +653,7 @@ export default function TareasPage() {
         <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Banco de Tareas</h1>
-          <p className="text-slate-600 mt-1">Gestiona las tareas de Cátedra de Familia</p>
+          <p className="text-slate-600 mt-1">Gestiona1 las tareas de Cátedra de Familia</p>
         </div>
         <div className="flex items-center gap-2">
           {(userRole === 'orientador' || userRole === 'docente_aula') && (
